@@ -131,10 +131,6 @@ namespace Microsoft.ML.Probabilistic.Distributions
             {
                 Point = mean;
             }
-            else if (Double.IsPositiveInfinity(variance))
-            {
-                SetToUniform();
-            }
             else if (variance < 0)
             {
                 throw new ArgumentException("variance < 0 (" + variance + ")");
@@ -206,8 +202,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
         {
             if (!IsPointMass && Rate > double.MaxValue)
             {
-                Rate = Math.Pow(0, Power);
-                SetToPointMass();
+                Point = Math.Pow(0, Power);
             }
         }
 
@@ -269,23 +264,62 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// </remarks>
         public static GammaPower FromMeanAndMeanLog(double mean, double meanLog, double power)
         {
+            return FromMeanAndMeanLog(mean, meanLog, Math.Log(mean), power);
+        }
+
+        /// <summary>
+        /// Constructs a GammaPower distribution with the given mean and mean logarithm.
+        /// </summary>
+        /// <param name="mean">Desired expected value.</param>
+        /// <param name="meanLog">Desired expected logarithm.</param>
+        /// <param name="logMean">Logarithm of desired expected value.</param>
+        /// <param name="power">Desired power.</param>
+        /// <returns>A new GammaPower distribution.</returns>
+        /// <remarks>This function is equivalent to maximum-likelihood estimation of a Gamma distribution
+        /// from data given by sufficient statistics.
+        /// This function is significantly slower than the other constructors since it
+        /// involves nonlinear optimization. The algorithm is a generalized Newton iteration, 
+        /// described in "Estimating a Gamma distribution" by T. Minka, 2002.
+        /// </remarks>
+        public static GammaPower FromMeanAndMeanLog(double mean, double meanLog, double logMean, double power)
+        {
+            // This iteration seems to diverge for power=-1
             // Constraints:
             // mean = Gamma(Shape + power)/Gamma(Shape)/Rate^power
             // meanLog = power*(digamma(Shape) - log(Rate))
             // digamma(Shape) =approx log(Shape - 0.5)
-            double logMeanOverPower = Math.Log(mean) / power;
+            double logMeanOverPower = logMean / power;
             double meanLogOverPower = meanLog / power;
             double shape = 1;
             double logRate = 0;
-            for (int iter = 0; iter < 1000; iter++)
+            int maxiter = 1000000;
+            for (int iter = 0; iter < maxiter; iter++)
             {
                 double oldLogRate = logRate;
                 double oldShape = shape;
-                logRate = MMath.RisingFactorialLnOverN(shape, power) - logMeanOverPower;
-                shape = Math.Exp(meanLogOverPower + logRate) + 0.5;
-                //Console.WriteLine($"shape = {shape:r}, logRate = {logRate:r}");
-                if (MMath.AreEqual(oldLogRate, logRate) && MMath.AreEqual(oldShape, shape)) break;
-                if (double.IsNaN(shape)) throw new Exception("Failed to converge");
+                if (power == -1)
+                {
+                    // mean = rate/(shape - 1)
+                    // meanLog = log(rate) - digamma(shape)
+                    logRate = meanLog + MMath.Digamma(shape);
+                    shape = 1 + Math.Exp(logRate - logMean);
+                }
+                else
+                {
+                    // Rate^power = Gamma(Shape + power)/Gamma(Shape)/mean
+                    // power*log(Rate) = log(Gamma(Shape + power)) - log(Gamma(Shape)) - log(mean)
+                    // derivative wrt shape is (digamma(Shape + power) - digamma(Shape))/power
+                    logRate = MMath.RisingFactorialLnOverN(shape, power) - logMeanOverPower;
+                    // derivative wrt logRate is exp(meanLogOverPower + logRate)
+                    shape = Math.Exp(meanLogOverPower + logRate) + 0.5;
+                }
+                //Console.WriteLine($"shape = {shape:g17}, logRate = {logRate:g17}");
+                if (MMath.AreEqual(oldLogRate, logRate) && MMath.AreEqual(oldShape, shape))
+                {
+                    //Console.WriteLine($"FromMeanAndMeanLog: {iter+1} iters");
+                    break;
+                }
+                if (double.IsNaN(shape) || iter == maxiter-1) throw new Exception("Failed to converge");
             }
             return FromShapeAndRate(shape, Math.Exp(logRate), power);
         }
@@ -451,15 +485,6 @@ namespace Microsoft.ML.Probabilistic.Distributions
         }
 
         /// <summary>
-        /// Sets this instance to a point mass. The location of the
-        /// point mass is the existing Rate parameter
-        /// </summary>
-        private void SetToPointMass()
-        {
-            Shape = Double.PositiveInfinity;
-        }
-
-        /// <summary>
         /// Sets/gets the instance as a point mass
         /// </summary>
         [IgnoreDataMember, System.Xml.Serialization.XmlIgnore]
@@ -472,7 +497,8 @@ namespace Microsoft.ML.Probabilistic.Distributions
             }
             set
             {
-                SetToPointMass();
+                // Change this instance to a point mass.
+                Shape = Double.PositiveInfinity;
                 Rate = value;
             }
         }
@@ -586,15 +612,17 @@ namespace Microsoft.ML.Probabilistic.Distributions
                 {
                     result -= rate;
                 }
-                else if (Math.Abs(logxOverPower) < 1e-8)
+                else if (Math.Abs(logxOverPower) < MMath.SqrtUlp1)
                 {
                     // The part of the log-density that depends on x is:
                     //   (shape/power-1)*log(x) - rate*x^(1/power)
                     // = (shape/power-1)*log(x) - rate*exp(log(x)/power))
-                    //   (when abs(log(x)/power) < 1e-8, exp(log(x)/power) = 1 + log(x)/power + 0.5*log(x)^2/power^2)
-                    // = (shape/power-1)*log(x) - rate*(1 + log(x)/power + 0.5*log(x)^2/power^2)
-                    // = ((shape - rate)/power - 1)*log(x) - rate*(1 + 0.5*log(x)^2/power^2)
-                    result += ((shape - rate) / power - 1) * logx - rate * (1 + 0.5 * logxOverPower * logxOverPower);
+                    //   (when abs(log(x)/power)^2 < ulp(1), exp(log(x)/power) can be approximated by 1 + log(x)/power, because
+                    //    the third term of this power series 0.5*log(x)^2/power^2 (as well as all other terms) is less than
+                    //    half-ulp of the first)
+                    // = (shape/power-1)*log(x) - rate*(1 + log(x)/power)
+                    // = ((shape - rate)/power - 1)*log(x) - rate
+                    result += ((shape - rate) / power - 1) * logx - rate;
                 }
                 else
                 {

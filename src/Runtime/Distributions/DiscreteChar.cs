@@ -1543,7 +1543,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
                 StorageCache.GetPointMass(point, ranges);
 
             public static Storage CreatePoint(char point) =>
-                StorageCache.GetPointMass(point, new ReadOnlyArray<CharRange>(null));
+                StorageCache.GetPointMass(point, null);
 
             public static Storage CreateUniformInRanges(
                 IEnumerable<char> startEndPairs,
@@ -1657,10 +1657,12 @@ namespace Microsoft.ML.Probabilistic.Distributions
 
             #region Serialization
 
-            public static Storage FromSerializationInfo(SerializationInfo info) =>
-                Storage.Create(
-                    (CharRange[]) info.GetValue(nameof(Ranges), typeof(CharRange[])),
-                    (CharClasses) info.GetValue(nameof(CharClasses), typeof(CharClasses)));
+            public static Storage FromSerializationInfo(SerializationInfo info)
+            {
+                var ranges = (CharRange[]) info.GetValue(nameof(Ranges), typeof(CharRange[]));
+                var classes = (CharClasses) info.GetValue(nameof(CharClasses), typeof(CharClasses));
+                return Storage.Create(ranges.ToReadOnlyArray(), classes);
+            }
 
             public void GetObjectData(SerializationInfo info)
             {
@@ -1680,10 +1682,8 @@ namespace Microsoft.ML.Probabilistic.Distributions
             /// </summary>
             public static Storage Read(Func<int> readInt32, Func<double> readDouble)
             {
-                CharRange[] ranges = null;
-
                 var nRanges = readInt32();
-                ranges = new CharRange[nRanges];
+                var ranges = new CharRange[nRanges];
                 for (var i = 0; i < nRanges; i++)
                 {
                     ranges[i] = CharRange.Read(readInt32, readDouble);
@@ -1691,7 +1691,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
 
                 var charClasses = (CharClasses)readInt32();
 
-                return Storage.Create(ranges, charClasses);
+                return Storage.Create(ranges.ToReadOnlyArray(), charClasses);
             }
 
             #endregion
@@ -1873,7 +1873,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
                 string WordCharRanges(string baseRange) => baseRange + "09__";
 
                 Uniform = Storage.CreateUncached(
-                    new CharRange[] { new CharRange(char.MinValue, CharRangeEndExclusive, UniformProb) },
+                    ReadOnlyArray.Create(new CharRange(char.MinValue, CharRangeEndExclusive, UniformProb)),
                     null,
                     CharClasses.Uniform,
                     UniformRegexRepresentation,
@@ -1906,14 +1906,14 @@ namespace Microsoft.ML.Probabilistic.Distributions
                 PointMasses = new Storage[CharRangeEndExclusive];
             }
 
-            public static Storage GetPointMass(char point, ReadOnlyArray<CharRange> ranges)
+            public static Storage GetPointMass(char point, ReadOnlyArray<CharRange>? ranges)
             {
                 if (PointMasses[point] == null)
                 {
                     PointMasses[point] = Storage.CreateUncached(
-                        ranges.IsNull
-                            ? new ReadOnlyArray<CharRange>(new[] { new CharRange(point, point + 1, Weight.One) })
-                            : ranges,
+                        ranges.HasValue
+                            ? ranges.Value
+                            : ReadOnlyArray.Create(new CharRange(point, point + 1, Weight.One)),
                         point);
                 }
 
@@ -2074,13 +2074,13 @@ namespace Microsoft.ML.Probabilistic.Distributions
                 return
                     maximumProbability.HasValue
                         ? Storage.CreateUncached(
-                            this.ranges.ToArray(),
+                            this.ranges.ToReadOnlyArray(),
                             null,
                             this.charClasses,
                             this.regexRepresentation,
                             this.symbolRepresentation)
                         : Storage.Create(
-                            this.ranges.ToArray(),
+                            this.ranges.ToReadOnlyArray(),
                             this.charClasses,
                             this.regexRepresentation,
                             this.symbolRepresentation);

@@ -46,7 +46,7 @@ namespace TestApp
             Trace.Listeners.Add(new TextWriterTraceListener(Console.Out));
             var logWriter = new StreamWriter("debug.txt");
             Trace.Listeners.Add(new TextWriterTraceListener(logWriter));
-#if NETFULL
+#if NETFRAMEWORK
             InferenceEngine.Visualizer = new WindowsVisualizer();
 #endif
             Debug.AutoFlush = true;
@@ -56,6 +56,7 @@ namespace TestApp
             //InferenceEngine.DefaultEngine.Compiler.CompilerChoice = Microsoft.ML.Probabilistic.Compiler.CompilerChoice.Roslyn;
             //InferenceEngine.DefaultEngine.Compiler.GenerateInMemory = false;
             InferenceEngine.DefaultEngine.Compiler.WriteSourceFiles = true;
+            InferenceEngine.DefaultEngine.Compiler.IncludeDebugInformation = true;
             //InferenceEngine.DefaultEngine.Compiler.OptimiseInferenceCode = false;
             //InferenceEngine.DefaultEngine.Compiler.FreeMemory = false;
             //InferenceEngine.DefaultEngine.Compiler.ReturnCopies = false;
@@ -75,12 +76,13 @@ namespace TestApp
             //InferenceEngine.DefaultEngine.Compiler.UseLocals = false;
             TestUtils.SetDebugOptions();
             TestUtils.SetBrowserMode(BrowserMode.OnError);
-            TestUtils.SetBrowserMode(BrowserMode.Always);
+            //TestUtils.SetBrowserMode(BrowserMode.Always);
             //TestUtils.SetBrowserMode(BrowserMode.WriteFiles);
 
             Stopwatch watch = new Stopwatch();
             watch.Start();
 
+            new VmpArrayTests().Regression();
 
             if (false)
             {
@@ -100,12 +102,13 @@ namespace TestApp
                 //TestUtils.CheckTransformNames();
             }
             //InferenceEngine.ShowFactorManager(true);
-#if NETFULL
+#if NETFRAMEWORK
             logWriter.Dispose();
 #endif
             watch.Stop();
             Console.WriteLine("elapsed time = {0}ms", watch.ElapsedMilliseconds);
         }
+
     }
 }
 

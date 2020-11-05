@@ -174,14 +174,16 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// <param name="rate">rate = 1/scale</param>
         public void SetShapeAndRate(double shape, double rate)
         {
-            if (rate > double.MaxValue)
+            this.Shape = shape;
+            this.Rate = rate;
+            CheckForPointMass();
+        }
+
+        private void CheckForPointMass()
+        {
+            if (!IsPointMass && Rate > double.MaxValue)
             {
                 Point = 0;
-            }
-            else
-            {
-                this.Shape = shape;
-                this.Rate = rate;
             }
         }
 
@@ -225,14 +227,8 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// <param name="scale">Scale</param>
         public void SetShapeAndScale(double shape, double scale)
         {
-            if (scale == 0)
-            {
-                Point = 0;
-            }
-            else
-            {
-                SetShapeAndRate(shape, 1.0 / scale);
-            }
+            if (double.IsPositiveInfinity(shape)) throw new ArgumentOutOfRangeException(nameof(shape), "shape is infinite.  To create a point mass, set the Point property.");
+            SetShapeAndRate(shape, 1.0 / scale);
         }
 
         /// <summary>
@@ -246,6 +242,17 @@ namespace Microsoft.ML.Probabilistic.Distributions
             Gamma result = new Gamma();
             result.SetShapeAndScale(shape, scale);
             return result;
+        }
+
+        static readonly double largeShape = Math.Sqrt(Math.Sqrt(1.0 / 120 / MMath.Ulp1));
+
+        private static double LogMinusDigamma(double shape)
+        {
+            if (shape > largeShape)
+                // The next term in the series is -1/120/shape^4, which bounds the error.
+                return (0.5 - 1.0 / 12 / shape) / shape;
+            else
+                return Math.Log(shape) - MMath.Digamma(shape);
         }
 
         /// <summary>
@@ -262,49 +269,36 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// </remarks>
         public static Gamma FromMeanAndMeanLog(double mean, double meanLog)
         {
-            double delta = Math.Log(mean) - meanLog;
-            if (delta <= 2e-16) return Gamma.PointMass(mean);
-            double shape = 0.5 / delta;
-            for (int iter = 0; iter < 100; iter++)
-            {
-                double oldShape = shape;
-                double g = Math.Log(shape) - delta - MMath.Digamma(shape);
-                shape /= 1 + g / (1 - shape * MMath.Trigamma(shape));
-                if (Math.Abs(shape - oldShape) < 1e-8) break;
-            }
-            if (Double.IsNaN(shape)) throw new Exception("shape is nan");
-            return Gamma.FromShapeAndRate(shape, shape / mean);
+            return FromMeanAndMeanLog(mean, meanLog, Math.Log(mean));
         }
 
         /// <summary>
-        /// Constructs a Gamma distribution with the given log mean and mean logarithm.
+        /// Constructs a Gamma distribution with the given mean and mean logarithm.
         /// </summary>
-        /// <param name="logMean">Log of desired expected value.</param>
+        /// <param name="mean">Desired expected value.</param>
         /// <param name="meanLog">Desired expected logarithm.</param>
+        /// <param name="logMean">Logarithm of desired expected value.</param>
         /// <returns>A new Gamma distribution.</returns>
-        /// <remarks>
+        /// <remarks>This function is equivalent to maximum-likelihood estimation of a Gamma distribution
+        /// from data given by sufficient statistics.
         /// This function is significantly slower than the other constructors since it
         /// involves nonlinear optimization. The algorithm is a generalized Newton iteration, 
         /// described in "Estimating a Gamma distribution" by T. Minka, 2002.
         /// </remarks>
-        public static Gamma FromLogMeanAndMeanLog(double logMean, double meanLog)
+        public static Gamma FromMeanAndMeanLog(double mean, double meanLog, double logMean)
         {
-            // logMean = log(shape)-log(rate)
-            // meanLog = Psi(shape)-log(rate)
-            // delta = log(shape)-Psi(shape)
             double delta = logMean - meanLog;
-            if (delta <= 2e-16) return Gamma.PointMass(Math.Exp(logMean));
+            if (delta <= 0) return Gamma.PointMass(mean);
             double shape = 0.5 / delta;
             for (int iter = 0; iter < 100; iter++)
             {
-                double oldShape = shape;
-                double g = Math.Log(shape) - delta - MMath.Digamma(shape);
+                double g = LogMinusDigamma(shape) - delta;
+                if (MMath.AreEqual(g, 0)) break;
                 shape /= 1 + g / (1 - shape * MMath.Trigamma(shape));
-                if (Math.Abs(shape - oldShape) < 1e-8) break;
             }
-            if (Double.IsNaN(shape)) throw new Exception("shape is nan");
-            Gamma result = Gamma.FromShapeAndRate(shape, shape / Math.Exp(logMean));
-            return result;
+            if (double.IsNaN(shape)) throw new Exception("shape is nan");
+            if (shape > double.MaxValue) return Gamma.PointMass(mean);
+            return Gamma.FromShapeAndRate(shape, shape / mean);
         }
 
         /// <summary>
@@ -538,15 +532,6 @@ namespace Microsoft.ML.Probabilistic.Distributions
         }
 
         /// <summary>
-        /// Sets this instance to a point mass. The location of the
-        /// point mass is the existing Rate parameter
-        /// </summary>
-        private void SetToPointMass()
-        {
-            Shape = Double.PositiveInfinity;
-        }
-
-        /// <summary>
         /// Sets/gets the instance as a point mass
         /// </summary>
         [IgnoreDataMember, System.Xml.Serialization.XmlIgnore]
@@ -560,7 +545,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
             }
             set
             {
-                SetToPointMass();
+                Shape = Double.PositiveInfinity;
                 Rate = value;
             }
         }
@@ -599,7 +584,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
         {
             if (x < 0) return double.NegativeInfinity;
             if (x > double.MaxValue) // Avoid subtracting infinities below
-            {               
+            {
                 if (rate > 0) return -x;
                 else if (rate < 0) return x;
                 // fall through when rate == 0
@@ -651,7 +636,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// <returns></returns>
         public double GetLogNormalizer()
         {
-            if (IsProper())
+            if (IsProper() && !IsPointMass)
             {
                 return MMath.GammaLn(Shape) - Shape * Math.Log(Rate);
             }

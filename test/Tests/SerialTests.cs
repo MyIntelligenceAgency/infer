@@ -23,8 +23,9 @@ namespace Microsoft.ML.Probabilistic.Tests
 {
     using Assert = Microsoft.ML.Probabilistic.Tests.AssertHelper;
     using GaussianArray = DistributionStructArray<Gaussian, double>;
+    using Range = Microsoft.ML.Probabilistic.Models.Range;
 
-    
+
     public class SerialTests
     {
 #if SUPPRESS_UNREACHABLE_CODE_WARNINGS
@@ -319,7 +320,6 @@ namespace Microsoft.ML.Probabilistic.Tests
         /// Fails with "enemyStrengthAfter is not defined in all cases"
         /// </summary>
         [Fact]
-        [Trait("Category", "OpenBug")]
         public void SumForwardBackwardTest()
         {
             var teamCount = Variable.Observed(2).Named("teamCount");
@@ -347,20 +347,13 @@ namespace Microsoft.ML.Probabilistic.Tests
             var enemyStrengthAfter = Variable.Array<double>(team);
             enemyStrengthAfter.Name = nameof(enemyStrengthAfter);
             var lastIndex = teamCount - 1;
-            // lastIndex must be observed to get inlining
-            // the check in ModelBuilder should propagate 'observed' property, or do the inlining later
-            //var lastIndex = Variable.Observed(1);
-            //lastIndex.Name = nameof(lastIndex);
             using (var block = Variable.ForEach(team))
             {
                 var teamIndex = block.Index;
-                var isLast = (teamIndex == teamCount - 1).Named("isLast");
-                //using(Variable.If(isLast)) // this version works
                 using (Variable.If(teamIndex == lastIndex))
                 {
                     enemyStrengthAfter[teamIndex] = 0.0;
                 }
-                //using(Variable.IfNot(isLast))
                 using (Variable.If(teamIndex < lastIndex))
                 {
                     enemyStrengthAfter[teamIndex] = enemyStrengthAfter[teamIndex + 1] + teamStrength[teamIndex + 1];
@@ -405,21 +398,14 @@ namespace Microsoft.ML.Probabilistic.Tests
             }
             var enemyStrengthAfter = Variable.Array<double>(team);
             enemyStrengthAfter.Name = nameof(enemyStrengthAfter);
-            //var lastIndex = teamCount - 1;
-            // lastIndex must be observed to get inlining
-            // the check in ModelBuilder should propagate 'observed' property, or do the inlining later
-            var lastIndex = Variable.Observed(1);
-            lastIndex.Name = nameof(lastIndex);
+            var lastIndex = teamCount - 1;
             using (var block = Variable.ForEach(team))
             {
                 var teamIndex = block.Index;
-                var isLast = (teamIndex == teamCount - 1).Named("isLast");
-                //using(Variable.If(isLast))
                 using (Variable.If(teamIndex == lastIndex))
                 {
                     enemyStrengthAfter[teamIndex] = 0.0;
                 }
-                //using(Variable.IfNot(isLast))
                 using (Variable.If(teamIndex < lastIndex))
                 {
                     enemyStrengthAfter[teamIndex] = enemyStrengthAfter[teamIndex + 1] + teamStrength[teamIndex + 1];
@@ -2349,6 +2335,100 @@ namespace Microsoft.ML.Probabilistic.Tests
         }
 
         [Fact]
+        public void SimplestBackwardChainTest3()
+        {
+            int length = 10;
+            var lengthVar = Variable.Observed(length).Named("length");
+
+            Range rows = new Range(lengthVar).Named("i");
+            VariableArray<double> states = Variable.Array<double>(rows).Named("states");
+
+            using (ForEachBlock rowBlock = Variable.ForEach(rows))
+            {
+                var index = rowBlock.Index;
+                //var lengthVarMinus1 = (lengthVar - 1).Named("lengthVarMinus1");
+                //using (Variable.If(index == lengthVarMinus1))
+                using (Variable.If(index == lengthVar - 1))
+                {
+                    states[rowBlock.Index] = Variable.GaussianFromMeanAndVariance(1, 1);
+                }
+                //using (Variable.If(index < lengthVarMinus1))
+                using (Variable.If(index < lengthVar - 1))
+                {
+                    states[rowBlock.Index] = Variable.GaussianFromMeanAndVariance(states[rowBlock.Index + 1], 1);
+                }
+            }
+
+            InferenceEngine engine = new InferenceEngine();
+            engine.NumberOfIterations = 1;
+            Console.WriteLine("After {0} Iterations", engine.NumberOfIterations);
+            var result1 = engine.Infer<Gaussian[]>(states);
+            for (int i = 0; i < length; i++)
+            {
+                Console.WriteLine("state[{0}] = {1}", i, result1[i]);
+            }
+            for (int i = 0; i < length; i++)
+            {
+                Assert.Equal(result1[i].GetVariance(), length - i, 1e-8);
+            }
+            engine.NumberOfIterations = 10;
+            int count = 0;
+            engine.ProgressChanged += delegate (InferenceEngine sender, InferenceProgressEventArgs progress)
+            {
+                count++;
+            };
+            engine.Infer(states);
+            Console.WriteLine("iter count = {0} should be 0", count);
+            Assert.Equal(0, count);
+        }
+
+        [Fact]
+        public void DeterministicChainTest()
+        {
+            int length = 10;
+            var lengthVar = Variable.Observed(length).Named("length");
+
+            Range rows = new Range(lengthVar).Named("i");
+            VariableArray<double> states = Variable.Array<double>(rows).Named("states");
+
+            using (ForEachBlock rowBlock = Variable.ForEach(rows))
+            {
+                var index = rowBlock.Index;
+                using (Variable.If(index == 0))
+                {
+                    states[rowBlock.Index] = 1;
+                }
+                using (Variable.If(index > 0))
+                {
+                    states[rowBlock.Index] = states[rowBlock.Index - 1] + 1;
+                }
+            }
+
+            InferenceEngine engine = new InferenceEngine();
+            engine.NumberOfIterations = 1;
+            Console.WriteLine("After {0} Iterations", engine.NumberOfIterations);
+            var result1 = engine.Infer<Gaussian[]>(states);
+            for (int i = 0; i < length; i++)
+            {
+                Console.WriteLine("state[{0}] = {1}", i, result1[i]);
+            }
+            for (int i = 0; i < length; i++)
+            {
+                Assert.True(result1[i].IsPointMass);
+                Assert.Equal(i+1, result1[i].Point);
+            }
+            engine.NumberOfIterations = 10;
+            int count = 0;
+            engine.ProgressChanged += delegate (InferenceEngine sender, InferenceProgressEventArgs progress)
+            {
+                count++;
+            };
+            engine.Infer(states);
+            Console.WriteLine("iter count = {0} should be 0", count);
+            Assert.Equal(0, count);
+        }
+
+        [Fact]
         public void SimplestChainWithObservationsTest()
         {
             int length = 10;
@@ -3663,7 +3743,7 @@ namespace Microsoft.ML.Probabilistic.Tests
             Console.WriteLine("shift = {0}", shiftActual1);
 
             int maxIter = 200;
-            if (false)
+            if (!engine.ShowProgress)
             {
                 for (int iter = 1; iter <= maxIter; iter++)
                 {
@@ -3710,7 +3790,7 @@ namespace Microsoft.ML.Probabilistic.Tests
         [Fact]
         public void ChainWithTransitionParameterTest()
         {
-            // without PointEstimator, EP doesn't converge unless length <= 700,
+            // without PointEstimate, EP doesn't converge unless length <= 700,
             // where it gets correct mean but variance = 1 (prior variance)
             int length = 1000;
 
@@ -3721,12 +3801,6 @@ namespace Microsoft.ML.Probabilistic.Tests
             VariableArray<double> observation = Variable.Array<double>(rows).Named("observations");
             Variable<double> shift = Variable.GaussianFromMeanAndVariance(0, 1).Named("shift");
             shift.AddAttribute(new PointEstimate());
-            //Variable<double> shiftPoint = Variable<double>.Factor(PointEstimator.Forward<double>, shift).Named("shiftPoint");
-            //Variable<double> shiftPoint = Variable<double>.Factor(PointEstimator.Forward2<double>, shift, (double)length).Named("shiftPoint");
-            //Variable<double> shiftPoint = Variable<double>.Factor(Damp.Forward<double>, shift, 0.1).Named("shiftPoint");
-            // when using PointEstimator.Forward with Secant, should always initialize
-            //shiftPoint.InitialiseTo(Gaussian.PointMass(0));
-            //shift.InitialiseTo(Gaussian.PointMass(1));
 
             using (ForEachBlock rowBlock = Variable.ForEach(rows))
             {
@@ -3766,7 +3840,7 @@ namespace Microsoft.ML.Probabilistic.Tests
             Console.WriteLine("shift = {0}", shiftActual1);
 
             int maxIter = 100;
-            if (false)
+            if (!engine.ShowProgress)
             {
                 for (int iter = 1; iter < maxIter; iter++)
                 {
@@ -3816,11 +3890,6 @@ namespace Microsoft.ML.Probabilistic.Tests
             VariableArray<double> observation = Variable.Array<double>(rows).Named("observations");
             Variable<double> shift = Variable.GaussianFromMeanAndVariance(0, 1).Named("shift");
             Variable<double> shift2 = Variable.GaussianFromMeanAndVariance(0, 1).Named("shift2");
-            //Variable<double> shiftPoint = Variable<double>.Factor(PointEstimator.Forward<double>, shift).Named("shiftPoint");
-            //Variable<double> shift2Point = Variable<double>.Factor(PointEstimator.Forward<double>, shift2).Named("shift2Point");
-            // when using PointEstimator.Forward with Secant, should always initialize
-            shift.InitialiseTo(Gaussian.PointMass(0));
-            shift2.InitialiseTo(Gaussian.PointMass(0));
 
             using (ForEachBlock rowBlock = Variable.ForEach(rows))
             {
@@ -3849,6 +3918,7 @@ namespace Microsoft.ML.Probabilistic.Tests
             observation.ObservedValue = observationValues;
 
             InferenceEngine engine = new InferenceEngine();
+            engine.ShowProgress = false;
             //engine.Compiler.GivePriorityTo(typeof(VariablePointOp_Secant));
             engine.OptimiseForVariables = new List<IVariable>() { states, shift, shift2 };
             engine.NumberOfIterations = 3;
@@ -3866,8 +3936,8 @@ namespace Microsoft.ML.Probabilistic.Tests
             Gaussian shift2Actual1 = engine.Infer<Gaussian>(shift2);
             Console.WriteLine("shift = {0}, shift2 = {1}", shiftActual1, shift2Actual1);
 
-            int maxIter = 100;
-            if (false)
+            int maxIter = engine.Compiler.OptimiseInferenceCode ? 100 : 200;
+            if (!engine.ShowProgress)
             {
                 for (int iter = 1; iter < maxIter; iter++)
                 {
@@ -3977,14 +4047,14 @@ namespace Microsoft.ML.Probabilistic.Tests
             //const double shiftMeanExpected = 0.767681001959026;
             const double shiftMeanExpected = 0.746576051928051;
             int maxIter = 100;
-            if (false)
+            if (!engine.ShowProgress)
             {
                 for (int iter = 1; iter < maxIter; iter++)
                 {
                     engine.NumberOfIterations = iter;
                     var shiftTemp = engine.Infer<Gaussian>(shift);
                     var precisionTemp = engine.Infer<Gamma>(precision);
-                    Debug.WriteLine("{0} shift={1} prec={2}", iter, shiftTemp.GetMean(), precisionTemp.GetMean());
+                    Console.WriteLine("{0} shift={1} prec={2}", iter, shiftTemp.GetMean(), precisionTemp.GetMean());
                     //if (shiftTemp.GetMean() == shiftMeanExpected)
                     //    throw new Exception("converged at iter " + iter);
                 }

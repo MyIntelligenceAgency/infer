@@ -57,16 +57,25 @@ namespace Microsoft.ML.Probabilistic.Compiler.Attributes
         internal IExpression marginalPrototypeExpression;
         //internal Type marginalType;
 
-        internal readonly IVariableDeclaration declaration;
+        internal readonly object declaration;
 
         public string Name
         {
-            get { return declaration.Name; }
+            get
+            {
+                if (declaration is IVariableDeclaration ivd) return ivd.Name;
+                else if (declaration is IParameterDeclaration ipd) return ipd.Name;
+                else if (declaration is IFieldDeclaration ifd) return ifd.Name;
+                else return null;
+            }
         }
 
         public IType VariableType
         {
-            get { return declaration.VariableType; }
+            get
+            {
+                return GetVariableType(declaration);
+            }
         }
 
         /// <summary>
@@ -81,11 +90,14 @@ namespace Microsoft.ML.Probabilistic.Compiler.Attributes
             {
                 if (innermostElementType == null)
                 {
-                    innermostElementType = varType;
+                    Type arrayType = varType;
                     for (int bracket = 0; bracket < sizes.Count; bracket++)
                     {
-                        innermostElementType = Util.GetElementType(innermostElementType);
+                        Type elementType = Util.GetElementType(arrayType, out int rank);
+                        if (!arrayType.IsAssignableFrom(Util.MakeArrayType(elementType, rank))) break;
+                        arrayType = elementType;
                     }
+                    innermostElementType = arrayType;
                 }
                 return innermostElementType;
             }
@@ -95,6 +107,11 @@ namespace Microsoft.ML.Probabilistic.Compiler.Attributes
         /// The number of the indexing bracket which always appears indexed by literals, or 0 if none
         /// </summary>
         public int LiteralIndexingDepth;
+
+        /// <summary>
+        /// The depth at which to start using distribution arrays in the message type.  Must be at least LiteralIndexingDepth.
+        /// </summary>
+        public int DistArrayDepth;
 
         /// <summary>
         /// jagged array depth of varType
@@ -110,10 +127,10 @@ namespace Microsoft.ML.Probabilistic.Compiler.Attributes
             get { return arrayDepth; }
         }
 
-        public VariableInformation(IVariableDeclaration declaration)
+        public VariableInformation(object declaration)
         {
             this.declaration = declaration;
-            varType = Builder.ToType(declaration.VariableType);
+            varType = Builder.ToType(GetVariableType(declaration));
             var elementType = varType;
             arrayDepth = 0;
             while (elementType.IsArray)
@@ -121,6 +138,14 @@ namespace Microsoft.ML.Probabilistic.Compiler.Attributes
                 elementType = elementType.GetElementType();
                 arrayDepth++;
             }
+        }
+
+        public static IType GetVariableType(object declaration)
+        {
+            if (declaration is IVariableDeclaration ivd) return ivd.VariableType;
+            else if (declaration is IParameterDeclaration ipd) return ipd.ParameterType;
+            else if (declaration is IFieldDeclaration ifd) return ifd.FieldType;
+            else return null;
         }
 
         public void SetSizesAtDepth(int depth, IExpression[] lengths)
@@ -222,9 +247,17 @@ namespace Microsoft.ML.Probabilistic.Compiler.Attributes
             return indexExprs;
         }
 
+        public IExpression GetExpression()
+        {
+            if (declaration is IVariableDeclaration ivd) return Builder.VarRefExpr(ivd);
+            else if (declaration is IParameterDeclaration ipd) return Builder.ParamRef(ipd);
+            else if (declaration is IFieldDeclaration ifd) return Builder.FieldRefExpr(ifd);
+            else throw new Exception();
+        }
+
         public void DefineSizesUpToDepth(BasicTransformContext context, int arrayDepth)
         {
-            IExpression sourceArray = Builder.VarRefExpr(declaration);
+            IExpression sourceArray = GetExpression();
             for (int depth = 0; depth < arrayDepth; depth++)
             {
                 bool notLast = (depth < arrayDepth - 1);
@@ -263,28 +296,15 @@ namespace Microsoft.ML.Probabilistic.Compiler.Attributes
         }
 
         /// <summary>
-        /// Gets the VariableInformation attribute of ivd, or creates one if it doesn't already exist
+        /// Gets the VariableInformation attribute of a declaration object, or creates one if it doesn't already exist
         /// </summary>
-        internal static VariableInformation GetVariableInformation(BasicTransformContext context, object target)
+        internal static VariableInformation GetVariableInformation(BasicTransformContext context, object declaration)
         {
-            IVariableDeclaration ivd = null;
-            if (target is IVariableDeclaration) ivd = (IVariableDeclaration)target;
-            else if (target is IParameterDeclaration)
-            {
-                IParameterDeclaration ipd = (IParameterDeclaration)target;
-                ivd = Builder.VarDecl(ipd.Name, ipd.ParameterType);
-            }
-            else if (target is IFieldDeclaration)
-            {
-                IFieldDeclaration ifd = (IFieldDeclaration)target;
-                ivd = Builder.VarDecl(ifd.Name, ifd.FieldType);
-            }
-            else throw new ArgumentException("target is not a variable or parameter");
-            VariableInformation vi = context.InputAttributes.Get<VariableInformation>(target);
+            VariableInformation vi = context.InputAttributes.Get<VariableInformation>(declaration);
             if (vi == null)
             {
-                vi = new VariableInformation(ivd);
-                context.InputAttributes.Set(target, vi);
+                vi = new VariableInformation(declaration);
+                context.InputAttributes.Set(declaration, vi);
             }
             return vi;
         }
@@ -322,9 +342,11 @@ namespace Microsoft.ML.Probabilistic.Compiler.Attributes
                 s.Append(']');
             }
             string indexVarsString = s.ToString();
-            if (indexVarsString.Length > 0) indexVarsString = ",indexVars=" + indexVarsString;
-            string optionString = (LiteralIndexingDepth != 0) ? (",LiteralIndexingDepth=" + LiteralIndexingDepth) : "";
-            return "VariableInformation(" + stocString + declaration + sizesString + indexVarsString + optionString + ")";
+            if (indexVarsString.Length > 0) indexVarsString = $",indexVars={indexVarsString}";
+            string literalIndexingString = (LiteralIndexingDepth != 0) ? $",LiteralIndexingDepth={LiteralIndexingDepth}" : "";
+            string distArrayDepthString = (DistArrayDepth != 0) ? $",DistArrayDepth={DistArrayDepth}" : "";
+            string marginalPrototypeString = (marginalPrototypeExpression == null) ? "" : $",{marginalPrototypeExpression.ToString()}";
+            return "VariableInformation(" + stocString + declaration + sizesString + indexVarsString + distArrayDepthString + literalIndexingString + marginalPrototypeString + ")";
         }
 
 
@@ -362,15 +384,13 @@ namespace Microsoft.ML.Probabilistic.Compiler.Attributes
         /// </summary>
         /// <param name="mpa"></param>
         /// <param name="throwIfMissing"></param>
-        internal bool SetMarginalPrototypeFromAttribute(Models.Attributes.MarginalPrototype mpa, bool throwIfMissing = true)
+        internal bool SetMarginalPrototypeFromAttribute(MarginalPrototype mpa, bool throwIfMissing = true)
         {
             if (mpa != null)
             {
                 if (mpa.prototypeExpression != null)
                 {
                     marginalPrototypeExpression = mpa.prototypeExpression;
-                    Type marginalType = mpa.prototypeExpression.GetExpressionType();
-                    if (marginalType == null) throw new InferCompilerException("Cannot determine type of marginal prototype expression: " + mpa.prototypeExpression);
                 }
                 else
                 {
@@ -432,10 +452,11 @@ namespace Microsoft.ML.Probabilistic.Compiler.Attributes
         /// <param name="name">Name of the new variable.</param>
         /// <param name="arraySize">Length of the array.  Cannot be null.</param>
         /// <param name="newIndexVar">Name of a new integer variable used to index the array.  Cannot be null.</param>
-        /// <param name="indices">Indices applied to this, before creating the array.  May be null.  May contain wildcards.</param>
+        /// <param name="indices">Indices applied to this, before creating the array.  May be null (equivalent to an empty array).  May contain wildcards.</param>
         /// <param name="wildcardVars">Loop variables to use for wildcards.  May be null if there are no wildcards.</param>
         /// <param name="useLiteralIndices">If true, literal indices will be used instead of newIndexVar.</param>
         /// <param name="copyInitializer">If true, the new variable will be given an InitialiseTo attribute if this variable had one</param>
+        /// <param name="useArrays">If true, the message type of the array will be a .NET array instead of DistributionArray.  Implied by <paramref name="useLiteralIndices"/>.</param>
         /// <remarks>
         /// The new array is indexed by wildcards first, then newIndexVar, then the indices remaining from the original array.
         /// For example, if original array is indexed [i,j][k,l][m,n] and indices = [*,*][3,*] then 
@@ -448,7 +469,8 @@ namespace Microsoft.ML.Probabilistic.Compiler.Attributes
                                                           IList<IList<IExpression>> indices = null,
                                                           IList<IList<IExpression>> wildcardVars = null,
                                                           bool useLiteralIndices = false,
-                                                          bool copyInitializer = false)
+                                                          bool copyInitializer = false,
+                                                          bool useArrays = false)
         {
             if (arraySize == null)
                 throw new ArgumentException("arraySize is null");
@@ -457,7 +479,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Attributes
             return DeriveArrayVariable(addTo, context, name,
                 new IExpression[][] { new[] { arraySize } },
                 new IVariableDeclaration[][] { new[] { newIndexVar } },
-                indices, wildcardVars, useLiteralIndices, copyInitializer);
+                indices, wildcardVars, useLiteralIndices, copyInitializer, useArrays);
         }
 
         internal IVariableDeclaration DeriveArrayVariable(ICollection<IStatement> addTo, BasicTransformContext context, string name,
@@ -465,7 +487,8 @@ namespace Microsoft.ML.Probabilistic.Compiler.Attributes
                                                           IList<IList<IExpression>> indices = null,
                                                           IList<IList<IExpression>> wildcardVars = null,
                                                           bool useLiteralIndices = false,
-                                                          bool copyInitializer = false)
+                                                          bool copyInitializer = false,
+                                                          bool useArrays = false)
         {
             List<IExpression[]> newSizes = new List<IExpression[]>();
             List<IVariableDeclaration[]> newIndexVars = new List<IVariableDeclaration[]>();
@@ -504,21 +527,24 @@ namespace Microsoft.ML.Probabilistic.Compiler.Attributes
                 }
             }
             int literalIndexingDepth = 0;
+            int distArrayDepth = 0;
             if (arraySize != null)
             {
                 newSizes.AddRange(arraySize);
+                if (useArrays || useLiteralIndices)
+                    distArrayDepth = newSizes.Count;
                 if (useLiteralIndices)
                     literalIndexingDepth = newSizes.Count;
                 newIndexVars.AddRange(newIndexVar);
             }
             // innerType may not be an array type, so we create the new array type here instead of descending further.
-            Type tp = CodeBuilder.MakeJaggedArrayType(innerType, newSizes);
+            Type arrayType = CodeBuilder.MakeJaggedArrayType(innerType, newSizes);
             int indexingDepth = (indices == null) ? 0 : indices.Count;
             List<IList<IExpression>> replacements = new List<IList<IExpression>>();
             if (indices != null) replacements.AddRange(indices);
             for (int i = indexingDepth; i < sizes.Count; i++)
             {
-                if (indices == null)
+                if (replacements.Count == 0)
                 {
                     newSizes.Add(sizes[i]);
                     if (indexVars.Count > i) newIndexVars.Add(indexVars[i]);
@@ -543,7 +569,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Attributes
                 }
             }
 
-            IVariableDeclaration arrayvd = Builder.VarDecl(CodeBuilder.MakeValid(name), tp);
+            IVariableDeclaration arrayvd = Builder.VarDecl(CodeBuilder.MakeValid(name), arrayType);
             Builder.NewJaggedArray(addTo, arrayvd, newIndexVars, newSizes, literalIndexingDepth);
             context.InputAttributes.CopyObjectAttributesTo(declaration, context.OutputAttributes, arrayvd);
             // cannot copy the initializer since it will have a different size.
@@ -559,27 +585,18 @@ namespace Microsoft.ML.Probabilistic.Compiler.Attributes
             context.OutputAttributes.Remove<QueryTypeCompilerAttribute>(arrayvd);
             context.OutputAttributes.Remove<DerivMessage>(arrayvd);
             context.OutputAttributes.Remove<PointEstimate>(arrayvd);
+            context.OutputAttributes.Remove<DescriptionAttribute>(arrayvd);
+            context.OutputAttributes.Remove<MarginalPrototype>(arrayvd);
             VariableInformation vi = VariableInformation.GetVariableInformation(context, arrayvd);
             vi.IsStochastic = IsStochastic;
             vi.sizes = newSizes;
             vi.indexVars = newIndexVars;
-            if (useLiteralIndices)
-                vi.LiteralIndexingDepth = literalIndexingDepth;
-            if (indexingDepth > 0)
+            vi.DistArrayDepth = distArrayDepth + System.Math.Max(0, this.DistArrayDepth - indexingDepth);
+            vi.LiteralIndexingDepth = literalIndexingDepth + System.Math.Max(0, this.LiteralIndexingDepth - indexingDepth);
+            if (marginalPrototypeExpression != null)
             {
-                // substitute indices in the marginal prototype expression (if any)
-                MarginalPrototype mpa = context.InputAttributes.Get<MarginalPrototype>(declaration);
-                if (mpa != null && mpa.prototypeExpression != null)
-                {
-                    IExpression mpe = GetMarginalPrototypeExpression(context, mpa.prototypeExpression, replacements, wildcardVars);
-                    if (mpe != mpa.prototypeExpression)
-                    {
-                        MarginalPrototype mpa2 = new MarginalPrototype(null);
-                        mpa2.prototypeExpression = mpe;
-                        context.OutputAttributes.Remove<MarginalPrototype>(arrayvd);
-                        context.OutputAttributes.Set(arrayvd, mpa2);
-                    }
-                }
+                // substitute indices in the marginal prototype expression
+                vi.marginalPrototypeExpression = GetMarginalPrototypeExpression(context, marginalPrototypeExpression, replacements, wildcardVars);
             }
             InitialiseTo it = context.InputAttributes.Get<InitialiseTo>(declaration);
             if (it != null && copyInitializer)
@@ -666,7 +683,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Attributes
                                                             List<IList<IExpression>> indices = null, IList<IList<IExpression>> wildcardVars = null,
                                                             bool copyInitializer = false)
         {
-            return DeriveArrayVariable(addTo, context, name, (IList<IExpression[]>)null, null, indices, wildcardVars, false, copyInitializer);
+            return DeriveArrayVariable(addTo, context, name, (IList<IExpression[]>)null, null, indices, wildcardVars, copyInitializer: copyInitializer);
         }
 
         /// <summary>
@@ -725,7 +742,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Attributes
         /// <param name="replacedIndexVars"></param>
         private static void CheckReplacements(BasicTransformContext context, IExpression expr, Dictionary<IVariableDeclaration, IExpression> replacedIndexVars)
         {
-            foreach(var v in Recognizer.GetVariables(expr))
+            foreach (var v in Recognizer.GetVariables(expr))
             {
                 Containers containers = context.InputAttributes.Get<Containers>(v);
                 if (containers != null && !replacedIndexVars.ContainsKey(v))
