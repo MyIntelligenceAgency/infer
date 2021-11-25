@@ -7,6 +7,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
     using System;
     using System.Collections.Generic;
     using System.Linq;
+using System.Reflection;
     using System.Runtime.Serialization;
     using System.Text;
     using System.Threading.Tasks;
@@ -18,7 +19,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
     /// Represents a distribution using the quantiles at probabilities (0,...,n-1)/(n-1)
     /// </summary>
     [Serializable, DataContract]
-    public class OuterQuantiles : CanGetQuantile, CanGetProbLessThan
+    public class OuterQuantiles : CanGetQuantile<double>, CanGetProbLessThan<double>
     {
         /// <summary>
         /// Numbers in increasing order.
@@ -83,7 +84,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
             }
         }
 
-        public static OuterQuantiles FromDistribution(int quantileCount, CanGetQuantile canGetQuantile)
+        public static OuterQuantiles FromDistribution(int quantileCount, CanGetQuantile<double> canGetQuantile)
         {
             var quantiles = Util.ArrayInit(quantileCount, i => canGetQuantile.GetQuantile(i / (quantileCount - 1.0)));
             return new OuterQuantiles(quantiles);
@@ -113,14 +114,32 @@ namespace Microsoft.ML.Probabilistic.Distributions
             if (index >= 0)
             {
                 while (index > 0 && quantiles[index - 1] == quantiles[index]) index--;
-                return (double)index / (n - 1);
+                if (index == 0) return 0;
+                else return (double)index / (n - 1);
             }
             index = ~index;
             if (index == 0) return 0.0;
             if (index >= n) return 1.0;
             // quantiles[index-1] < x <= quantiles[index]
-            double frac = (x - quantiles[index - 1]) / (quantiles[index] - quantiles[index - 1]);
+            double diff = quantiles[index] - quantiles[index - 1];
+            double frac;
+            if (diff > double.MaxValue)
+            {
+                double scale = Math.Max(Math.Abs(quantiles[index]), Math.Abs(quantiles[index - 1]));
+                double q = quantiles[index - 1] / scale;
+                frac = (x / scale - q) / (quantiles[index] / scale - q);
+            }
+            else
+            {
+                frac = (x - quantiles[index - 1]) / diff;
+            }
             return (index - 1 + frac) / (n - 1);
+        }
+
+        /// <inheritdoc/>
+        public double GetProbBetween(double lowerBound, double upperBound)
+        {
+            return Math.Max(0.0, GetProbLessThan(upperBound) - GetProbLessThan(lowerBound));
         }
 
         /// <summary>
@@ -177,8 +196,19 @@ namespace Microsoft.ML.Probabilistic.Distributions
             if (upperItem == lowerItem) return lowerItem;
             // The above check ensures diff > 0
             double diff = upperItem - lowerItem;
-            double offset = MMath.LargestDoubleProduct(frac, diff);
-            return MMath.LargestDoubleSum(lowerItem, offset);
+            if (diff > double.MaxValue)
+            {
+                double scale = Math.Max(Math.Abs(upperItem), Math.Abs(lowerItem));
+                double lowerItemOverScale = lowerItem / scale;
+                diff = upperItem / scale - lowerItemOverScale;
+                double offset = MMath.LargestDoubleProduct(frac, diff);
+                return MMath.LargestDoubleSum(lowerItemOverScale, offset) * scale;
+            }
+            else
+            {
+                double offset = MMath.LargestDoubleProduct(frac, diff);
+                return MMath.LargestDoubleSum(lowerItem, offset);
+            }
         }
     }
 }

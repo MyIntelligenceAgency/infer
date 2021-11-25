@@ -16,23 +16,10 @@ namespace Microsoft.ML.Probabilistic.Distributions.Automata
     /// Represents a weighted finite state automaton defined on <see cref="string"/>.
     /// </summary>
     [Serializable]
-    public class StringAutomaton : Automaton<string, char, DiscreteChar, StringManipulator, StringAutomaton>
+    public class StringAutomaton : Automaton<string, char, ImmutableDiscreteChar, StringManipulator, StringAutomaton>
     {
         public StringAutomaton()
         {
-        }
-        
-        /// <summary>
-        /// Whether there are log value overrides at the element level.
-        /// </summary>
-        public bool HasElementLogValueOverrides
-        {
-            get
-            {
-                return this.States.transitions.Any(
-                    trans => trans.ElementDistribution.HasValue &&
-                             trans.ElementDistribution.Value.HasLogProbabilityOverride);
-            }
         }
 
         /// <summary>
@@ -63,7 +50,7 @@ namespace Microsoft.ML.Probabilistic.Distributions.Automata
                     var (destinationStateSet, destinationStateSetWeight) = destinationStateSetBuilder.Get();
                     var segmentLength = segmentBound.Position - currentSegmentStart;
                     yield return new Determinization.OutgoingTransition(
-                        DiscreteChar.InRange((char)currentSegmentStart, (char)(segmentBound.Position - 1)),
+                        ImmutableDiscreteChar.InRange((char)currentSegmentStart, (char)(segmentBound.Position - 1)),
                         Weight.FromValue(segmentLength) * destinationStateSetWeight,
                         destinationStateSet);
 
@@ -210,7 +197,7 @@ namespace Microsoft.ML.Probabilistic.Distributions.Automata
         /// Reads an automaton from.
         /// </summary>
         public static StringAutomaton Read(BinaryReader reader) => 
-            Read(reader.ReadDouble, reader.ReadInt32, () => DiscreteChar.Read(reader.ReadInt32, reader.ReadDouble));
+            Read(reader.ReadDouble, reader.ReadInt32, () => ImmutableDiscreteChar.Read(reader.ReadInt32, reader.ReadDouble));
 
         /// <summary>
         /// Writes the current automaton.

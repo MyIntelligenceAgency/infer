@@ -87,7 +87,7 @@ namespace Microsoft.ML.Probabilistic.Learners.MatchboxRecommenderInternal
 		/// <summary>Field backing the ItemCount property</summary>
 		private int itemCount;
 		/// <summary>Field backing the ItemIds property</summary>
-		private IList<int> itemIds;
+		private IReadOnlyList<int> itemIds;
 		public DistributionStructArray<Gaussian,double>[] itemTrait_B;
 		public DistributionRefArray<DistributionStructArray<Gaussian,double>,double[]> ItemTraits_itemItemIds_observation__F;
 		/// <summary>Message from use of 'ItemTraits'</summary>
@@ -113,7 +113,7 @@ namespace Microsoft.ML.Probabilistic.Learners.MatchboxRecommenderInternal
 		public Discrete[] Ratings_observation__selector_uses_B_toDef;
 		/// <summary>Field backing the TraitCount property</summary>
 		private int traitCount;
-		/// <summary>Buffer for DoubleIsBetweenOp.LogEvidenceRatio</summary>
+		/// <summary>Buffer for IsBetweenGaussianOp.LogEvidenceRatio</summary>
 		public double[][] true_logZ;
 		public DistributionStructArray<Gaussian,double> UserBias_itemUserIds_observation__F;
 		/// <summary>Message from use of 'UserBias'</summary>
@@ -126,7 +126,7 @@ namespace Microsoft.ML.Probabilistic.Learners.MatchboxRecommenderInternal
 		/// <summary>Field backing the UserCount property</summary>
 		private int userCount;
 		/// <summary>Field backing the UserIds property</summary>
-		private IList<int> userIds;
+		private IReadOnlyList<int> userIds;
 		/// <summary>Field backing the UserThresholdCount property</summary>
 		private int userThresholdCount;
 		/// <summary>Field backing the UserThresholdNoiseVariance property</summary>
@@ -221,7 +221,7 @@ namespace Microsoft.ML.Probabilistic.Learners.MatchboxRecommenderInternal
 		}
 
 		/// <summary>The externally-specified value of 'ItemIds'</summary>
-		public IList<int> ItemIds
+		public IReadOnlyList<int> ItemIds
 		{
 			get {
 				return this.itemIds;
@@ -357,7 +357,7 @@ namespace Microsoft.ML.Probabilistic.Learners.MatchboxRecommenderInternal
 		}
 
 		/// <summary>The externally-specified value of 'UserIds'</summary>
-		public IList<int> UserIds
+		public IReadOnlyList<int> UserIds
 		{
 			get {
 				return this.userIds;
@@ -505,8 +505,8 @@ namespace Microsoft.ML.Probabilistic.Learners.MatchboxRecommenderInternal
 			}
 			for(int observation = 0; observation<this.observationCount; observation++) {
 				for(int ratingValue = 0; ratingValue<this.vint45; ratingValue++) {
-					this.true_logZ[observation][ratingValue] = DoubleIsBetweenOp.LogZ(Bernoulli.PointMass(true), this.vdouble169_F[observation], this.vdouble__89_F[observation][this.CurrentRating_reduced[ratingValue]], this.vdouble__89_F[observation][this.NextRating_reduced[ratingValue]]);
-					this.Ratings_observation__selector_cases_uses_B[observation][ratingValue][6] = Bernoulli.FromLogOdds(DoubleIsBetweenOp.LogEvidenceRatio(true, this.vdouble169_F[observation], this.vdouble__89_F[observation][this.CurrentRating_reduced[ratingValue]], this.vdouble__89_F[observation][this.NextRating_reduced[ratingValue]], this.true_logZ[observation][ratingValue]));
+					this.true_logZ[observation][ratingValue] = IsBetweenGaussianOp.LogZ(Bernoulli.PointMass(true), this.vdouble169_F[observation], this.vdouble__89_F[observation][this.CurrentRating_reduced[ratingValue]], this.vdouble__89_F[observation][this.NextRating_reduced[ratingValue]]);
+					this.Ratings_observation__selector_cases_uses_B[observation][ratingValue][6] = Bernoulli.FromLogOdds(IsBetweenGaussianOp.LogEvidenceRatio(true, this.vdouble169_F[observation], this.vdouble__89_F[observation][this.CurrentRating_reduced[ratingValue]], this.vdouble__89_F[observation][this.NextRating_reduced[ratingValue]], this.true_logZ[observation][ratingValue]));
 					this.Ratings_observation__selector_cases_B[observation][ratingValue] = ReplicateOp_NoDivide.DefAverageConditional<Bernoulli>(this.Ratings_observation__selector_cases_uses_B[observation][ratingValue], this.Ratings_observation__selector_cases_B[observation][ratingValue]);
 				}
 				this.Ratings_observation__selector_uses_B[observation][0] = IntCasesOp.IAverageConditional(this.Ratings_observation__selector_cases_B[observation], this.Ratings_observation__selector_uses_B[observation][0]);
@@ -1243,11 +1243,11 @@ namespace Microsoft.ML.Probabilistic.Learners.MatchboxRecommenderInternal
 				return ;
 			}
 			if (variableName=="UserIds") {
-				this.UserIds = (IList<int>)value;
+				this.UserIds = (IReadOnlyList<int>)value;
 				return ;
 			}
 			if (variableName=="ItemIds") {
-				this.ItemIds = (IList<int>)value;
+				this.ItemIds = (IReadOnlyList<int>)value;
 				return ;
 			}
 			if (variableName=="AffinityNoiseVariance") {

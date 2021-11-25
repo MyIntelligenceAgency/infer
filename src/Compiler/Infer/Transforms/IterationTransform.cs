@@ -34,7 +34,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
 
         private ModelCompiler compiler;
         LoopCountAnalysisTransform analysis;
-        Dictionary<IStatement, IEnumerable<IStatement>> clonesOfStatement = new Dictionary<IStatement, IEnumerable<IStatement>>(new IdentityComparer<IStatement>());
+        Dictionary<IStatement, IEnumerable<IStatement>> clonesOfStatement = new Dictionary<IStatement, IEnumerable<IStatement>>(ReferenceEqualityComparer<IStatement>.Instance);
         private LoopMergingInfo loopMergingInfo;
 
         public IterationTransform(ModelCompiler compiler)
@@ -67,12 +67,12 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
 
         protected override void DoConvertMethodBody(IList<IStatement> outputs, IList<IStatement> inputs)
         {
-            List<IStatement> isc = Schedule(inputs);
+            List<IStatement> isc = Schedule((IReadOnlyList<IStatement>)inputs);
             RegisterUnchangedStatements(isc);
             outputs.AddRange(isc);
         }
 
-        protected List<IStatement> Schedule(IList<IStatement> isc)
+        protected List<IStatement> Schedule(IReadOnlyList<IStatement> isc)
         {
             bool dependsOnIteration = false;
             foreach (IStatement ist in isc)
@@ -135,7 +135,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
             }
         }
 
-        private bool CancelsIntoIncrement(DependencyGraph g, IList<IStatement> stmts, EdgeIndex edge)
+        private bool CancelsIntoIncrement(DependencyGraph g, IReadOnlyList<IStatement> stmts, EdgeIndex edge)
         {
             if (g.isCancels[edge])
             {
@@ -159,7 +159,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
         {
         }
 
-        private List<IStatement> Schedule(DependencyGraph g, IList<IStatement> stmts, bool createFirstIterPostBlocks)
+        private List<IStatement> Schedule(DependencyGraph g, IReadOnlyList<IStatement> stmts, bool createFirstIterPostBlocks)
         {
             List<IStatement> output = new List<IStatement>();
             List<StatementBlock> blocks = new List<StatementBlock>();
@@ -223,7 +223,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
             IndexedProperty<NodeIndex, bool> isUniform = graph2.CreateNodeData<bool>(true);
             foreach (StatementBlock block in blocks)
             {
-                if (block is Loop)
+                if (block is Loop loop)
                 {
                     foreach (NodeIndex i in block.indices)
                     {
@@ -255,9 +255,8 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
                             // add all statements in sc3 to whileBody, but remove while loops around a single statement.
                             foreach (IStatement ist in sc3)
                             {
-                                if (ist is IWhileStatement)
+                                if (ist is IWhileStatement iws2)
                                 {
-                                    IWhileStatement iws2 = (IWhileStatement)ist;
                                     if (iws2.Body.Statements.Count == 1)
                                     {
                                         whileBody.AddRange(iws2.Body.Statements);
@@ -280,7 +279,6 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
                         }
                         RegisterUnchangedStatements(whileBody);
                     }
-                    Loop loop = (Loop)block;
                     if (firstIterPostprocessing != null && firstIterPostprocessing.ContainsKey(loop))
                     {
                         var thenBlock = firstIterPostprocessing[loop];
@@ -334,7 +332,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
         /// <param name="dependencyGraph"></param>
         /// <param name="stmts"></param>
         /// <param name="nodesToMove">Modified on exit</param>
-        private Dictionary<Loop, IBlockStatement> GetFirstIterPostprocessing(List<StatementBlock> blocks, DirectedGraphFilter<NodeIndex, EdgeIndex> dependencyGraph, IList<IStatement> stmts, ICollection<NodeIndex> nodesToMove)
+        private Dictionary<Loop, IBlockStatement> GetFirstIterPostprocessing(List<StatementBlock> blocks, DirectedGraphFilter<NodeIndex, EdgeIndex> dependencyGraph, IReadOnlyList<IStatement> stmts, ICollection<NodeIndex> nodesToMove)
         {
             var hasUserInitializedAncestor = dependencyGraph.CreateNodeData(false);
             DepthFirstSearch<NodeIndex> dfsInitBlock = new DepthFirstSearch<int>(dependencyGraph.SourcesOf, dependencyGraph);
@@ -406,7 +404,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
             return firstIterPostprocessing;
         }
 
-        private bool ContainsIterationStatement(IList<IStatement> stmts, IEnumerable<NodeIndex> block)
+        private bool ContainsIterationStatement(IReadOnlyList<IStatement> stmts, IEnumerable<NodeIndex> block)
         {
             foreach (NodeIndex i in block)
             {
@@ -441,7 +439,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
 
     internal class LoopCountAnalysisTransform : ShallowCopyTransform
     {
-        public Dictionary<IVariableDeclaration, int> loopVarCount = new Dictionary<IVariableDeclaration, int>(new IdentityComparer<IVariableDeclaration>());
+        public Dictionary<IVariableDeclaration, int> loopVarCount = new Dictionary<IVariableDeclaration, int>(ReferenceEqualityComparer<IVariableDeclaration>.Instance);
 
         protected override IStatement ConvertFor(IForStatement ifs)
         {

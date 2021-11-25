@@ -49,7 +49,7 @@ namespace Microsoft.ML.Probabilistic.Compiler
         /// </summary>
         protected Dictionary<string, string> typeReferenceMap = new Dictionary<string, string>();
 
-        private Set<Assembly> referencedAssemblies = new Set<Assembly>();
+        private readonly Set<Assembly> referencedAssemblies = new Set<Assembly>();
 
         public ICollection<Assembly> ReferencedAssemblies
         {
@@ -92,7 +92,7 @@ namespace Microsoft.ML.Probabilistic.Compiler
         // Following all need to be overridden
         protected abstract void AppendInterfaces(StringBuilder sb, List<ITypeReference> interfaces, bool hasBaseType);
         protected abstract void AppendAttribute(StringBuilder sb, ICustomAttribute attr);
-        protected abstract void AppendGenericArguments(StringBuilder sb, IGenericArgumentProvider igap);
+        protected abstract void AppendGenericArguments(StringBuilder sb, IEnumerable<IType> genericArguments);
         protected abstract void AppendArrayRank(StringBuilder sb, int ar);
         protected abstract void AppendVariableDeclaration(StringBuilder sb, IVariableDeclaration ivd);
         protected abstract void AppendAddressOutExpression(StringBuilder sb, IAddressOutExpression iae);
@@ -510,21 +510,19 @@ namespace Microsoft.ML.Probabilistic.Compiler
             string typName = itr.Name;
 
             Type typ = itr.DotNetType;
-            bool usedGenericParams = false;
+            int usedGenericParamsCount = 0;
             var originalType = typ;
             if (typ != null)
             {
                 StringBuilder sb2 = new StringBuilder();
-                // Assumes there are generic parameters on the outer class or the nested class but not both.
-                // todo: fix
-                while (typ.IsNested && !typ.IsGenericParameter)
+                if (typ.IsNested && !typ.IsGenericParameter)
                 {
                     typ = typ.DeclaringType;
                     // if typ contains generic parameters then we need to consume them from the original type
                     if (typ.ContainsGenericParameters)
                     {
-                        typ = typ.MakeGenericType(originalType.GetGenericArguments());
-                        usedGenericParams = true;
+                        usedGenericParamsCount = typ.GetGenericArguments().Length;
+                        typ = typ.MakeGenericType(originalType.GetGenericArguments().Take(usedGenericParamsCount).ToArray());
                     }
                     AppendType(sb2, typ);
                     sb2.Append(".");
@@ -557,8 +555,8 @@ namespace Microsoft.ML.Probabilistic.Compiler
             AddReferencedAssembly(itr);
             // TODO: if two namespaces have the same type name, we need to use the full name to make sure we refer to the right namespace.
             sb.Append(typName);
-            if (Builder.IsTypeInstRef(itr) && !usedGenericParams)
-                AppendGenericArguments(sb, itr);
+            if (Builder.IsTypeInstRef(itr))
+                AppendGenericArguments(sb, itr.GenericArguments.Skip(usedGenericParamsCount));
         }
 
         private HashSet<string> LoadedNamespaces;
@@ -600,8 +598,8 @@ namespace Microsoft.ML.Probabilistic.Compiler
         {
             // find the parent Assembly and add a reference to it
             object owner = itr.Owner;
-            while (owner is ITypeReference) owner = ((ITypeReference) owner).Owner;
-            if (owner is Assembly) ReferencedAssemblies.Add((Assembly) owner);
+            while (owner is ITypeReference reference) owner = reference.Owner;
+            if (owner is Assembly assembly) ReferencedAssemblies.Add(assembly);
             else if(owner != null) throw new InferCompilerException("unknown assembly for type reference: " + itr.DotNetType);
         }
 
@@ -807,10 +805,12 @@ namespace Microsoft.ML.Probabilistic.Compiler
         /// <returns>source node</returns>
         public virtual SourceNode AttachBlockStatement(IBlockStatement ibs)
         {
-            SourceNode sn = new SourceNode();
-            sn.ASTElement = ibs;
-            sn.StartString = BlockStatementStart(ibs);
-            sn.EndString = BlockStatementEnd(ibs);
+            SourceNode sn = new SourceNode
+            {
+                ASTElement = ibs,
+                StartString = BlockStatementStart(ibs),
+                EndString = BlockStatementEnd(ibs)
+            };
             AddChild(sn);
             nodeStack.Push(sn);
             AttachStatements(ibs.Statements);
@@ -825,10 +825,12 @@ namespace Microsoft.ML.Probabilistic.Compiler
         /// <returns>source node</returns>
         public virtual SourceNode AttachBreakStatement(IBreakStatement ibs)
         {
-            SourceNode sn = new SourceNode();
-            sn.ASTElement = ibs;
-            sn.StartString = BreakStatementStart(ibs);
-            sn.EndString = BreakStatementEnd(ibs);
+            SourceNode sn = new SourceNode
+            {
+                ASTElement = ibs,
+                StartString = BreakStatementStart(ibs),
+                EndString = BreakStatementEnd(ibs)
+            };
             AddChild(sn);
             return sn;
         }
@@ -840,10 +842,12 @@ namespace Microsoft.ML.Probabilistic.Compiler
         /// <returns>source node</returns>
         public virtual SourceNode AttachCommentStatement(ICommentStatement ics)
         {
-            SourceNode sn = new SourceNode();
-            sn.ASTElement = ics;
-            sn.StartString = CommentStatementStart(ics);
-            sn.EndString = CommentStatementEnd(ics);
+            SourceNode sn = new SourceNode
+            {
+                ASTElement = ics,
+                StartString = CommentStatementStart(ics),
+                EndString = CommentStatementEnd(ics)
+            };
             AddChild(sn);
             return sn;
         }
@@ -886,10 +890,12 @@ namespace Microsoft.ML.Probabilistic.Compiler
 
         public virtual SourceNode AttachContinueStatement(IContinueStatement ics)
         {
-            SourceNode sn = new SourceNode();
-            sn.ASTElement = ics;
-            sn.StartString = ContinueStatementStart(ics);
-            sn.EndString = ContinueStatementEnd(ics);
+            SourceNode sn = new SourceNode
+            {
+                ASTElement = ics,
+                StartString = ContinueStatementStart(ics),
+                EndString = ContinueStatementEnd(ics)
+            };
             AddChild(sn);
             return sn;
         }
@@ -901,10 +907,12 @@ namespace Microsoft.ML.Probabilistic.Compiler
         /// <returns>source node</returns>
         public virtual SourceNode AttachExpressionStatement(IExpressionStatement ies)
         {
-            SourceNode sn = new SourceNode();
-            sn.ASTElement = ies;
-            sn.StartString = ExpressionStatementStart(ies);
-            sn.EndString = ExpressionStatementEnd(ies);
+            SourceNode sn = new SourceNode
+            {
+                ASTElement = ies,
+                StartString = ExpressionStatementStart(ies),
+                EndString = ExpressionStatementEnd(ies)
+            };
             AddChild(sn);
             return sn;
         }
@@ -916,10 +924,12 @@ namespace Microsoft.ML.Probabilistic.Compiler
         /// <returns>source node</returns>
         public virtual SourceNode AttachForEachStatement(IForEachStatement ifes)
         {
-            SourceNode sn = new SourceNode();
-            sn.ASTElement = ifes;
-            sn.StartString = ForEachStatementStart(ifes);
-            sn.EndString = ForEachStatementEnd(ifes);
+            SourceNode sn = new SourceNode
+            {
+                ASTElement = ifes,
+                StartString = ForEachStatementStart(ifes),
+                EndString = ForEachStatementEnd(ifes)
+            };
             AddChild(sn);
             nodeStack.Push(sn);
             currTab++;
@@ -936,10 +946,12 @@ namespace Microsoft.ML.Probabilistic.Compiler
         /// <returns>source node</returns>
         public virtual SourceNode AttachForStatement(IForStatement ifs)
         {
-            SourceNode sn = new SourceNode();
-            sn.ASTElement = ifs;
-            sn.StartString = ForStatementStart(ifs);
-            sn.EndString = ForStatementEnd(ifs);
+            SourceNode sn = new SourceNode
+            {
+                ASTElement = ifs,
+                StartString = ForStatementStart(ifs),
+                EndString = ForStatementEnd(ifs)
+            };
             AddChild(sn);
             nodeStack.Push(sn);
             currTab++;
@@ -957,10 +969,12 @@ namespace Microsoft.ML.Probabilistic.Compiler
         /// <returns>source node</returns>
         public virtual SourceNode AttachRepeatStatement(IRepeatStatement irs)
         {
-            SourceNode sn = new SourceNode();
-            sn.ASTElement = irs;
-            sn.StartString = RepeatStatementStart(irs);
-            sn.EndString = RepeatStatementEnd(irs);
+            SourceNode sn = new SourceNode
+            {
+                ASTElement = irs,
+                StartString = RepeatStatementStart(irs),
+                EndString = RepeatStatementEnd(irs)
+            };
             AddChild(sn);
             nodeStack.Push(sn);
             currTab++;
@@ -977,10 +991,12 @@ namespace Microsoft.ML.Probabilistic.Compiler
         /// <returns>source node</returns>
         public virtual SourceNode AttachMethodReturnStatement(IMethodReturnStatement imrs)
         {
-            SourceNode sn = new SourceNode();
-            sn.ASTElement = imrs;
-            sn.StartString = MethodReturnStatementStart(imrs);
-            sn.EndString = MethodReturnStatementEnd(imrs);
+            SourceNode sn = new SourceNode
+            {
+                ASTElement = imrs,
+                StartString = MethodReturnStatementStart(imrs),
+                EndString = MethodReturnStatementEnd(imrs)
+            };
             AddChild(sn);
             return sn;
         }
@@ -992,10 +1008,12 @@ namespace Microsoft.ML.Probabilistic.Compiler
         /// <returns>source node</returns>
         public virtual SourceNode AttachSwitchStatement(ISwitchStatement iss)
         {
-            SourceNode sn = new SourceNode();
-            sn.ASTElement = iss;
-            sn.StartString = SwitchStatementStart(iss);
-            sn.EndString = SwitchStatementEnd(iss);
+            SourceNode sn = new SourceNode
+            {
+                ASTElement = iss,
+                StartString = SwitchStatementStart(iss),
+                EndString = SwitchStatementEnd(iss)
+            };
             AddChild(sn);
             nodeStack.Push(sn);
             currTab++;
@@ -1015,10 +1033,12 @@ namespace Microsoft.ML.Probabilistic.Compiler
         /// <returns>source node</returns>
         public virtual SourceNode AttachSwitchCase(ISwitchCase isc)
         {
-            SourceNode sn = new SourceNode();
-            sn.ASTElement = isc;
-            sn.StartString = SwitchCaseStart(isc);
-            sn.EndString = SwitchCaseEnd(isc);
+            SourceNode sn = new SourceNode
+            {
+                ASTElement = isc,
+                StartString = SwitchCaseStart(isc),
+                EndString = SwitchCaseEnd(isc)
+            };
 
             AddChild(sn);
             nodeStack.Push(sn);
@@ -1037,10 +1057,12 @@ namespace Microsoft.ML.Probabilistic.Compiler
         /// <returns>source node</returns>
         public virtual SourceNode AttachCatchClause(ICatchClause icc)
         {
-            SourceNode sn = new SourceNode();
-            sn.ASTElement = icc;
-            sn.StartString = CatchClauseStart(icc);
-            sn.EndString = CatchClauseEnd(icc);
+            SourceNode sn = new SourceNode
+            {
+                ASTElement = icc,
+                StartString = CatchClauseStart(icc),
+                EndString = CatchClauseEnd(icc)
+            };
 
             AddChild(sn);
             nodeStack.Push(sn);
@@ -1058,10 +1080,12 @@ namespace Microsoft.ML.Probabilistic.Compiler
         /// <returns></returns>
         public virtual SourceNode AttachThrowExceptionStatement(IThrowExceptionStatement ites)
         {
-            SourceNode sn = new SourceNode();
-            sn.ASTElement = ites;
-            sn.StartString = ThrowExceptionStart(ites);
-            sn.EndString = ThrowExceptionEnd(ites);
+            SourceNode sn = new SourceNode
+            {
+                ASTElement = ites,
+                StartString = ThrowExceptionStart(ites),
+                EndString = ThrowExceptionEnd(ites)
+            };
             AddChild(sn);
             return sn;
         }
@@ -1125,10 +1149,12 @@ namespace Microsoft.ML.Probabilistic.Compiler
         /// <returns>source node</returns>
         public virtual SourceNode AttachUsingStatement(IUsingStatement ius)
         {
-            SourceNode sn = new SourceNode();
-            sn.StartString = UsingStatementStart(ius);
-            sn.EndString = UsingStatementEnd(ius);
-            sn.ASTElement = ius;
+            SourceNode sn = new SourceNode
+            {
+                ASTElement = ius,
+                StartString = UsingStatementStart(ius),
+                EndString = UsingStatementEnd(ius)
+            };
             AddChild(sn);
             nodeStack.Push(sn);
             currTab++;
@@ -1145,10 +1171,12 @@ namespace Microsoft.ML.Probabilistic.Compiler
         /// <returns>source node</returns>
         public virtual SourceNode AttachWhileStatement(IWhileStatement iws)
         {
-            SourceNode sn = new SourceNode();
-            sn.StartString = WhileStatementStart(iws);
-            sn.EndString = WhileStatementEnd(iws);
-            sn.ASTElement = iws;
+            SourceNode sn = new SourceNode
+            {
+                StartString = WhileStatementStart(iws),
+                EndString = WhileStatementEnd(iws),
+                ASTElement = iws
+            };
             AddChild(sn);
             nodeStack.Push(sn);
             currTab++;

@@ -7,7 +7,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using Microsoft.ML.Probabilistic.Compiler.Attributes;
-using Microsoft.ML.Probabilistic.Compiler;
 using Microsoft.ML.Probabilistic.Collections;
 using Microsoft.ML.Probabilistic.Utilities;
 using Microsoft.ML.Probabilistic.Compiler.CodeModel;
@@ -41,8 +40,8 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
 
         internal static bool debug;
         private Dictionary<IStatement, Dictionary<IExpression, LocalAnalysisTransform.LocalInfo>> localInfoOfStmt;
-        private Stack<IStatement> openContainers = new Stack<IStatement>();
-        private ModelCompiler compiler;
+        private readonly Stack<IStatement> openContainers = new Stack<IStatement>();
+        private readonly ModelCompiler compiler;
         private bool isTransformingContainer;
 
         internal LocalTransform(ModelCompiler compiler)
@@ -350,7 +349,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
         /// <summary>
         /// Maps an IForStatement to its LocalInfos
         /// </summary>
-        internal Dictionary<IStatement, Dictionary<IExpression, LocalInfo>> localInfoOfStmt = new Dictionary<IStatement, Dictionary<IExpression, LocalInfo>>(new IdentityComparer<IStatement>());
+        internal Dictionary<IStatement, Dictionary<IExpression, LocalInfo>> localInfoOfStmt = new Dictionary<IStatement, Dictionary<IExpression, LocalInfo>>(ReferenceEqualityComparer<IStatement>.Instance);
         private Stack<IStatement> openContainers = new Stack<IStatement>();
         private bool InPartitionedLoop;
         ModelCompiler compiler;
@@ -633,7 +632,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
             info.count++;
             if (info.containingStatements == null)
             {
-                info.containingStatements = new HashSet<IStatement>(openContainers, new IdentityComparer<IStatement>());
+                info.containingStatements = new HashSet<IStatement>(openContainers, ReferenceEqualityComparer<IStatement>.Instance);
                 info.containers = GetContainers();
             }
             else

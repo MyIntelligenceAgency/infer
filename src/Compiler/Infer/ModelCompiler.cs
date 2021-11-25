@@ -26,11 +26,8 @@ namespace Microsoft.ML.Probabilistic.Compiler
     /// </summary>
     public class ModelCompiler
     {
-#pragma warning disable 1591
-        protected IDeclarationProvider dp;
-        internal FactorManager factorManager = new FactorManager();
-        protected IAlgorithm algorithm;
-#pragma warning restore 1591
+        private readonly FactorManager factorManager = new FactorManager();
+        private IAlgorithm algorithm;
 
         /// <summary>
         /// Assembly resolve event handler. Ref: James Margetson's Excel Add-in bug.
@@ -77,11 +74,7 @@ namespace Microsoft.ML.Probabilistic.Compiler
         /// <summary>
         /// Declaration provider for model defined in MSL
         /// </summary>
-        public IDeclarationProvider DeclarationProvider
-        {
-            get { return dp; }
-            set { dp = value; }
-        }
+        public IDeclarationProvider DeclarationProvider { get; set; }
 
         /// <summary>
         /// Controls if source code files are written to disk.  If true, source code files will be 
@@ -750,9 +743,9 @@ namespace Microsoft.ML.Probabilistic.Compiler
         /// <returns>An instance of the compiled model, without any parameters set.</returns>
         public IGeneratedAlgorithm CompileWithoutParams(MethodBase method)
         {
-            if (null == dp)
+            if (null == DeclarationProvider)
                 throw new InferCompilerException("A type declaration provider has not been set for this instance of the model compiler");
-            return CompileWithoutParams(dp.GetTypeDeclaration(method?.DeclaringType, true),
+            return CompileWithoutParams(DeclarationProvider.GetTypeDeclaration(method?.DeclaringType, true),
                                         method, new AttributeRegistry<object, ICompilerAttribute>(true));
         }
 
@@ -766,13 +759,11 @@ namespace Microsoft.ML.Probabilistic.Compiler
         internal List<ITypeDeclaration> GetTransformedDeclaration(ITypeDeclaration itd, MethodBase method, AttributeRegistry<object, ICompilerAttribute> inputAttributes)
         {
             TransformerChain tc = ConstructTransformChain(method);
-            List<ITypeDeclaration> output;
             try
             {
                 Compiling?.Invoke(this, new CompileEventArgs());
                 bool trackTransform = (BrowserMode != BrowserMode.Never);
-                List<TransformError> warnings;
-                output = tc.TransformToDeclaration(itd, inputAttributes, trackTransform, ShowProgress, out warnings, CatchExceptions, TreatWarningsAsErrors);
+                List<ITypeDeclaration> output = tc.TransformToDeclaration(itd, inputAttributes, trackTransform, ShowProgress, out List<TransformError> warnings, CatchExceptions, TreatWarningsAsErrors);
                 OnCompiled(new CompileEventArgs()
                     {
                         Warnings = warnings
@@ -794,6 +785,7 @@ namespace Microsoft.ML.Probabilistic.Compiler
                         }
                     }
                 }
+                return output;
             }
             catch (TransformFailedException ex)
             {
@@ -801,7 +793,6 @@ namespace Microsoft.ML.Probabilistic.Compiler
                 if (BrowserMode != BrowserMode.Never) ShowBrowser(tc, GeneratedSourceFolder, itd.Name);
                 throw new CompilationFailedException(ex.Results, ex.Message);
             }
-            return output;
         }
 
         private void OnCompiled(CompileEventArgs e)
@@ -824,15 +815,17 @@ namespace Microsoft.ML.Probabilistic.Compiler
 
         internal T CompileWithoutParams<T>(List<ITypeDeclaration> itds)
         {
-            CodeCompiler cc = new CodeCompiler();
-            cc.GeneratedSourceFolder = GeneratedSourceFolder;
-            cc.writeSourceFiles = WriteSourceFiles;
-            cc.useExistingFiles = UseExistingSourceFiles;
-            cc.generateInMemory = GenerateInMemory;
-            cc.includeDebugInformation = IncludeDebugInformation;
-            cc.optimizeCode = !IncludeDebugInformation; // tie these together for now
-            cc.showProgress = ShowProgress;
-            cc.compilerChoice = CompilerChoice;
+            CodeCompiler cc = new CodeCompiler
+            {
+                GeneratedSourceFolder = GeneratedSourceFolder,
+                writeSourceFiles = WriteSourceFiles,
+                useExistingFiles = UseExistingSourceFiles,
+                generateInMemory = GenerateInMemory,
+                includeDebugInformation = IncludeDebugInformation,
+                optimizeCode = !IncludeDebugInformation, // tie these together for now
+                showProgress = ShowProgress,
+                compilerChoice = CompilerChoice
+            };
             CompilerResults cr = cc.WriteAndCompile(itds);
             // Examine the compilation results and stop if errors
             if (cr.Errors.Count > 0)

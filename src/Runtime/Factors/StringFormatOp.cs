@@ -35,12 +35,6 @@ namespace Microsoft.ML.Probabilistic.Factors
         /// </summary>
         private static readonly ConcurrentDictionary<string, StringAutomaton> ArgsToValidatingAutomaton =
             new ConcurrentDictionary<string, StringAutomaton>();
-
-        /// <summary>
-        /// An automaton that allows only for non-empty strings. Used to validate arguments.
-        /// </summary>
-        private static readonly StringAutomaton DisallowEmptyArgsAutomaton =
-            StringAutomaton.Repeat(StringAutomaton.ConstantOnElement(1.0, DiscreteChar.Any()));
         
         /// <summary>
         /// An automaton that accepts any string without '{' and '}' in it.
@@ -64,7 +58,7 @@ namespace Microsoft.ML.Probabilistic.Factors
             // More general behavior by default
             RequirePlaceholderForEveryArgument = false;
 
-            DiscreteChar noBraces = DiscreteChar.OneOf('{', '}').Complement();
+            var noBraces = ImmutableDiscreteChar.OneOf('{', '}').Complement();
             DisallowBracesAutomaton = StringAutomaton.Constant(1.0, noBraces);
             DisallowBracesTransducer = StringTransducer.Copy(noBraces);
 
@@ -88,49 +82,48 @@ namespace Microsoft.ML.Probabilistic.Factors
 
         #region EP messages
 
-        public static StringDistribution StrAverageConditional(StringDistribution format, IList<string> args, IReadOnlyList<string> argNames)
+        public static StringDistribution StrAverageConditional(StringDistribution format, IReadOnlyList<string> args, IReadOnlyList<string> argNames)
         {
             Argument.CheckIfNotNull(args, "args");
 
             return StrAverageConditional(format, ToAutomatonArray(args), argNames);
         }
 
-        public static StringDistribution StrAverageConditional(StringDistribution format, IList<StringDistribution> args, IReadOnlyList<string> argNames)
+        public static StringDistribution StrAverageConditional(StringDistribution format, IReadOnlyList<StringDistribution> args, IReadOnlyList<string> argNames)
         {
             Argument.CheckIfNotNull(format, "format");
             ValidateArguments(args, argNames);
 
-            var allowedArgs = args.Select(arg => arg.GetWorkspaceOrPoint()).ToList();
+            var allowedArgs = args.Select(arg => arg.ToAutomaton()).ToList();
             return StrAverageConditionalImpl(format, allowedArgs, argNames, withGroups: false, noValidation: false);
         }
 
         public static StringDistribution StrAverageConditional_NoValidation(
-            StringDistribution format, IList<StringDistribution> args, IReadOnlyList<string> argNames)
+            StringDistribution format, IReadOnlyList<StringDistribution> args, IReadOnlyList<string> argNames)
         {
             Argument.CheckIfNotNull(format, "format");
             ValidateArguments(args, argNames);
 
-            var allowedArgs = args.Select(arg => arg.GetWorkspaceOrPoint()).ToList();
+            var allowedArgs = args.Select(arg => arg.ToAutomaton()).ToList();
             return StrAverageConditionalImpl(format, allowedArgs, argNames, withGroups: false, noValidation: true);
         }
 
-        public static StringDistribution FormatAverageConditional(StringDistribution str, IList<string> args, IReadOnlyList<string> argNames)
+        public static StringDistribution FormatAverageConditional(StringDistribution str, IReadOnlyList<string> args, IReadOnlyList<string> argNames)
         {
             Argument.CheckIfNotNull(args, "args");
 
             return FormatAverageConditional(str, ToAutomatonArray(args), argNames);
         }
 
-        public static StringDistribution FormatAverageConditional(StringDistribution str, IList<StringDistribution> args, IReadOnlyList<string> argNames)
+        public static StringDistribution FormatAverageConditional(StringDistribution str, IReadOnlyList<StringDistribution> args, IReadOnlyList<string> argNames)
         {
             Argument.CheckIfNotNull(str, "str");
             ValidateArguments(args, argNames);
 
-            var allowedArgs = args.Select(arg => arg.GetWorkspaceOrPoint()).ToList();
+            var allowedArgs = args.Select(arg => arg.ToAutomaton()).ToList();
 
             // Try optimizations for special cases
-            StringDistribution resultDist;
-            if (TryOptimizedFormatAverageConditionalImpl(str, allowedArgs, argNames, out resultDist))
+            if (TryOptimizedFormatAverageConditionalImpl(str, allowedArgs, argNames, out StringDistribution resultDist))
             {
                 return resultDist;
             }
@@ -139,29 +132,31 @@ namespace Microsoft.ML.Probabilistic.Factors
             var placeholderReplacer = GetPlaceholderReplacingTransducer(allowedArgs, argNames, true, false);
             StringAutomaton format = str.IsPointMass
                 ? placeholderReplacer.ProjectSource(str.Point)
-                : placeholderReplacer.ProjectSource(str.GetWorkspaceOrPoint());
+                : placeholderReplacer.ProjectSource(str.ToAutomaton());
             StringAutomaton validatedFormat = GetValidatedFormatString(format, argNames);
-            return StringDistribution.FromWorkspace(validatedFormat);
+            return StringDistribution.FromWeightFunction(validatedFormat);
         }
 
-        public static StringDistribution ToStrReverseMessage(StringDistribution format, IList<StringDistribution> args, IReadOnlyList<string> argNames)
+        public static StringDistribution ToStrReverseMessage(StringDistribution format, IEnumerable<StringDistribution> args, IReadOnlyList<string> argNames)
         {
             return ComputeToStrReverseMessage(format, args, argNames, true);
         }
 
-        public static StringDistribution ComputeToStrReverseMessage(StringDistribution format, IList<StringDistribution> args, IReadOnlyList<string> argNames, bool makeEpsilonFree)
+        public static StringDistribution ComputeToStrReverseMessage(StringDistribution format, IEnumerable<StringDistribution> args, IReadOnlyList<string> argNames, bool makeEpsilonFree)
         {
-            var allowedArgs = args.Select(arg => arg.GetWorkspaceOrPoint()).ToList();
+            var allowedArgs = args.Select(arg => arg.ToAutomaton()).ToList();
             StringDistribution toStr = StrAverageConditionalImpl(format, allowedArgs, argNames, withGroups: true, noValidation: false);
             if (makeEpsilonFree)
             {
-                toStr.GetWorkspaceOrPoint().MakeEpsilonFree();
+                var weightFunction = toStr.GetWeightFunction();
+                if (weightFunction.UsesAutomatonRepresentation)
+                    toStr.SetWeightFunction(weightFunction.AsAutomaton().GetEpsilonClosure());
             }
             return toStr;
         }
 
         public static TStringDistributionList ArgsAverageConditional<TStringDistributionList>(
-            StringDistribution str, StringDistribution format, IList<StringDistribution> args, IReadOnlyList<string> argNames, TStringDistributionList result)
+            StringDistribution str, StringDistribution format, IReadOnlyList<StringDistribution> args, IReadOnlyList<string> argNames, TStringDistributionList result)
             where TStringDistributionList : class, IList<StringDistribution>
         {
             Argument.CheckIfNotNull(str, "str");
@@ -169,13 +164,13 @@ namespace Microsoft.ML.Probabilistic.Factors
             ValidateArguments(args, argNames);
 
             StringDistribution toStr = ToStrReverseMessage(format, args, argNames);
-            return ArgsAverageConditionalBuffered(str,toStr,args,result);
+            return ArgsAverageConditionalBuffered(str, toStr, args, result);
         }
 
         private static readonly StringDistribution Uniform = StringDistribution.Uniform();
 
         public static TStringDistributionList ArgsAverageConditionalBuffered<TStringDistributionList>(
-            StringDistribution str, StringDistribution toStrReverseMessage, IList<StringDistribution> args, TStringDistributionList result)
+            StringDistribution str, StringDistribution toStrReverseMessage, IReadOnlyList<StringDistribution> args, TStringDistributionList result)
             where TStringDistributionList : class, IList<StringDistribution>
         {
             ArgsAverageConditionalBufferedWithNulls(str, toStrReverseMessage, args, result);
@@ -186,7 +181,7 @@ namespace Microsoft.ML.Probabilistic.Factors
         }
 
         public static TStringDistributionList ArgsAverageConditionalBufferedWithNulls<TStringDistributionList>(
-            StringDistribution str, StringDistribution toStrReverseMessage, IList<StringDistribution> args, TStringDistributionList result)
+            StringDistribution str, StringDistribution toStrReverseMessage, IReadOnlyList<StringDistribution> args, TStringDistributionList result)
             where TStringDistributionList : class, IList<StringDistribution>
         {
             var toStrTimesStr = toStrReverseMessage.Product(str);
@@ -212,8 +207,11 @@ namespace Microsoft.ML.Probabilistic.Factors
                     }
                     else
                     {
-                        group.GetWorkspaceOrPoint().TryNormalizeValues();
+                        var weightFunction = group.GetWeightFunction();
+                        if (weightFunction.TryNormalizeValues(out var normalizedWeightFunction, out var _))
+                            group.SetWeightFunction(normalizedWeightFunction);
                     }
+
                     result[i] = group;
                 }
             }
@@ -227,7 +225,7 @@ namespace Microsoft.ML.Probabilistic.Factors
             return 0;
         }
 
-        public static double LogEvidenceRatio(string str, StringDistribution format, IList<StringDistribution> args, IReadOnlyList<string> argNames)
+        public static double LogEvidenceRatio(string str, StringDistribution format, IReadOnlyList<StringDistribution> args, IReadOnlyList<string> argNames)
         {
             Argument.CheckIfNotNull(str, "str");
 
@@ -235,7 +233,7 @@ namespace Microsoft.ML.Probabilistic.Factors
             return toStr.GetLogProb(str);
         }
 
-        public static double LogEvidenceRatio(string str, StringDistribution format, IList<string> args, IReadOnlyList<string> argNames)
+        public static double LogEvidenceRatio(string str, StringDistribution format, IReadOnlyList<string> args, IReadOnlyList<string> argNames)
         {
             Argument.CheckIfNotNull(args, "args");
 
@@ -247,7 +245,7 @@ namespace Microsoft.ML.Probabilistic.Factors
         #region Helpers
 
         /// <summary>
-        /// An implementation of <see cref="FormatAverageConditional(StringDistribution, IList{StringDistribution}, IReadOnlyList{string})"/>
+        /// An implementation of <see cref="FormatAverageConditional(StringDistribution, IReadOnlyList{StringDistribution}, IReadOnlyList{string})"/>
         /// specialized for some cases for performance reasons.
         /// </summary>
         /// <param name="str">The message from <c>str</c>.</param>
@@ -265,7 +263,7 @@ namespace Microsoft.ML.Probabilistic.Factors
         /// are non-overlapping.
         /// </remarks>
         private static bool TryOptimizedFormatAverageConditionalImpl(
-            StringDistribution str, IList<StringAutomaton> allowedArgs, IReadOnlyList<string> argNames, out StringDistribution resultDist)
+            StringDistribution str, IReadOnlyList<StringAutomaton> allowedArgs, IReadOnlyList<string> argNames, out StringDistribution resultDist)
         {
             resultDist = null;
 
@@ -310,29 +308,29 @@ namespace Microsoft.ML.Probabilistic.Factors
                 }
 
                 // Append the contents of 'str' preceeding the current argument
-                result.AppendInPlace(str.Point.Substring(prevArgumentPos + prevArgumentLength, curArgumentPos - prevArgumentPos - prevArgumentLength));
+                result = result.Append(str.Point.Substring(prevArgumentPos + prevArgumentLength, curArgumentPos - prevArgumentPos - prevArgumentLength));
 
                 // The format may have included either the text ot the placeholder
                 string argName = "{" + argNames[curArgumentIndex] + "}";
                 if (RequirePlaceholderForEveryArgument)
                 {
-                    result.AppendInPlace(StringAutomaton.ConstantOn(1.0, argName));
+                    result = result.Append(StringAutomaton.ConstantOn(1.0, argName));
                 }
                 else
                 {
-                    result.AppendInPlace(StringAutomaton.ConstantOn(1.0, argName, allowedArgPoints[curArgumentIndex]));
+                    result = result.Append(StringAutomaton.ConstantOn(1.0, argName, allowedArgPoints[curArgumentIndex]));
                 }   
             }
 
             // Append the rest of 'str'
-            result.AppendInPlace(str.Point.Substring(curArgumentPos + curArgumentLength, str.Point.Length - curArgumentPos - curArgumentLength));
+            result = result.Append(str.Point.Substring(curArgumentPos + curArgumentLength, str.Point.Length - curArgumentPos - curArgumentLength));
 
-            resultDist = StringDistribution.FromWorkspace(result);
+            resultDist = StringDistribution.FromWeightFunction(result);
             return true;
         }
 
         /// <summary>
-        /// The implementation of <see cref="StrAverageConditional(StringDistribution, IList{StringDistribution}, IReadOnlyList{string})"/>.
+        /// The implementation of <see cref="StrAverageConditional(StringDistribution, IReadOnlyList{StringDistribution}, IReadOnlyList{string})"/>.
         /// </summary>
         /// <param name="format">The message from <c>format</c>.</param>
         /// <param name="allowedArgs">The message from <c>args</c>, truncated to allowed values and converted to automata.</param>
@@ -341,7 +339,7 @@ namespace Microsoft.ML.Probabilistic.Factors
         /// <param name="noValidation">Whether incorrect format string values should not be pruned.</param>
         /// <returns>The message to <c>str</c>.</returns>
         private static StringDistribution StrAverageConditionalImpl(
-            StringDistribution format, IList<StringAutomaton> allowedArgs, IReadOnlyList<string> argNames, bool withGroups, bool noValidation)
+            StringDistribution format, IReadOnlyList<StringAutomaton> allowedArgs, IReadOnlyList<string> argNames, bool withGroups, bool noValidation)
         {
             StringDistribution resultDist = TryOptimizedStrAverageConditionalImpl(format, allowedArgs, argNames, withGroups);
             if (resultDist != null)
@@ -350,21 +348,21 @@ namespace Microsoft.ML.Probabilistic.Factors
             }
             
             // Check braces for correctness.
-            StringAutomaton validatedFormat = format.GetWorkspaceOrPoint();
+            StringAutomaton validatedFormat = format.ToAutomaton();
             if (!noValidation)
             {
-                validatedFormat = GetValidatedFormatString(format.GetWorkspaceOrPoint(), argNames);
+                validatedFormat = GetValidatedFormatString(format.ToAutomaton(), argNames);
             }
 
             // Now replace placeholders with arguments
             var placeholderReplacer = GetPlaceholderReplacingTransducer(allowedArgs, argNames, false, withGroups);
             StringAutomaton str = placeholderReplacer.ProjectSource(validatedFormat);
 
-            return StringDistribution.FromWorkspace(str);
+            return StringDistribution.FromWeightFunction(str);
         }
 
         /// <summary>
-        /// An implementation of <see cref="StrAverageConditional(StringDistribution, IList{StringDistribution}, IReadOnlyList{string})"/>
+        /// An implementation of <see cref="StrAverageConditional(StringDistribution, IReadOnlyList{StringDistribution}, IReadOnlyList{string})"/>
         /// specialized for some cases for performance reasons.
         /// </summary>
         /// <param name="format">The message from <c>format</c>.</param>
@@ -379,7 +377,7 @@ namespace Microsoft.ML.Probabilistic.Factors
         /// Supports the case of point mass <paramref name="format"/>.
         /// </remarks>
         private static StringDistribution TryOptimizedStrAverageConditionalImpl(
-            StringDistribution format, IList<StringAutomaton> allowedArgs, IReadOnlyList<string> argNames, bool withGroups)
+            StringDistribution format, IReadOnlyList<StringAutomaton> allowedArgs, IReadOnlyList<string> argNames, bool withGroups)
         {
             if (!format.IsPointMass)
             {
@@ -439,7 +437,7 @@ namespace Microsoft.ML.Probabilistic.Factors
             // Append the part of the format after the last placeholder
             result.Append(StringAutomaton.ConstantOn(1.0, format.Point.Substring(closingBraceIndex + 1, format.Point.Length - closingBraceIndex - 1)));
 
-            return StringDistribution.FromWorkspace(result.GetAutomaton());
+            return StringDistribution.FromWeightFunction(result.GetAutomaton());
         }
 
         /// <summary>
@@ -451,7 +449,7 @@ namespace Microsoft.ML.Probabilistic.Factors
         /// <param name="withGroups">Specifies whether filled in arguments should be labeled with different groups.</param>
         /// <returns>The created transducer.</returns>
         private static StringTransducer GetPlaceholderReplacingTransducer(
-            IList<StringAutomaton> args, IReadOnlyList<string> argNames, bool forBackwardMessage, bool withGroups)
+            IReadOnlyList<StringAutomaton> args, IReadOnlyList<string> argNames, bool forBackwardMessage, bool withGroups)
         {
             var alternatives = new List<StringTransducer>();
             for (int argumentIndex = 0; argumentIndex < args.Count; ++argumentIndex)
@@ -503,9 +501,11 @@ namespace Microsoft.ML.Probabilistic.Factors
             for (int i = 0; i < argNames.Count; ++i)
             {
                 StringAutomaton validatingAutomaton = GetArgumentValidatingAutomaton(i, argNames);
-                result.SetToProduct(i == 0 ? format : result, validatingAutomaton);
-                result.ClearGroups();
-                result.TrySetToConstantOnSupportOfLog(0.0, result);
+                result = (i == 0 ? format : result)
+                    .Product(validatingAutomaton)
+                    .WithGroupsClear();
+
+                result.TryGetConstantOnSupportLog(0.0, out result);
             }
 
             return result;
@@ -540,19 +540,18 @@ namespace Microsoft.ML.Probabilistic.Factors
             if (argNames.Count > 1)
             {
                 // Skips placeholders for every argument except the current one
-                StringAutomaton skipOtherArgs = StringAutomaton.ConstantOnElement(1.0, '{');
-                skipOtherArgs.AppendInPlace(StringAutomaton.ConstantOn(1.0, argNames.Where((arg, index) => index != argToValidateIndex)));
-                skipOtherArgs.AppendInPlace(StringAutomaton.ConstantOnElement(1.0, '}'));
+                StringAutomaton skipOtherArgs = StringAutomaton.ConstantOnElement(1.0, '{')
+                    .Append(StringAutomaton.ConstantOn(1.0, argNames.Where((arg, index) => index != argToValidateIndex)))
+                    .Append(StringAutomaton.ConstantOnElement(1.0, '}'));
 
                 // Accepts placeholders for arguments other than current, with arbitrary intermediate text
-                checkBracesForOtherArgs.AppendInPlace(skipOtherArgs);
-                checkBracesForOtherArgs = StringAutomaton.Repeat(checkBracesForOtherArgs, minTimes: 0);
-                checkBracesForOtherArgs.AppendInPlace(DisallowBracesAutomaton);
+                checkBracesForOtherArgs = checkBracesForOtherArgs.Append(skipOtherArgs);
+                checkBracesForOtherArgs = StringAutomaton.Repeat(checkBracesForOtherArgs, minTimes: 0)
+                    .Append(DisallowBracesAutomaton);
             }
 
             // Checks the placeholder for the current argument, then skips placeholders for other arguments
-            StringAutomaton validateArgumentThenOtherArguments = checkBracesForCurrentArg.Clone();
-            validateArgumentThenOtherArguments.AppendInPlace(checkBracesForOtherArgs);
+            StringAutomaton validateArgumentThenOtherArguments = checkBracesForCurrentArg.Append(checkBracesForOtherArgs);
             if (!RequirePlaceholderForEveryArgument)
             {
                 // Make this block optional
@@ -562,10 +561,9 @@ namespace Microsoft.ML.Probabilistic.Factors
             }
 
             // Accepts placeholders for arguments other then current, then for the current argument, then again other placeholders
-            result = checkBracesForOtherArgs.Clone();
-            result.AppendInPlace(validateArgumentThenOtherArguments);
+            result = checkBracesForOtherArgs.Append(validateArgumentThenOtherArguments);
 
-            result.TryDeterminize();
+            result = result.TryDeterminize();
             ArgsToValidatingAutomaton[argListKey] = result;
 
             return result;
@@ -615,7 +613,7 @@ namespace Microsoft.ML.Probabilistic.Factors
         /// </summary>
         /// <param name="args">The message from <c>args</c>.</param>
         /// <param name="argNames">The names of the arguments.</param>
-        private static void ValidateArguments(IList<StringDistribution> args, IReadOnlyList<string> argNames)
+        private static void ValidateArguments(IReadOnlyList<StringDistribution> args, IReadOnlyList<string> argNames)
         {
             Argument.CheckIfNotNull(args, "args");
             Argument.CheckIfNotNull(argNames, "argNames");
@@ -630,7 +628,7 @@ namespace Microsoft.ML.Probabilistic.Factors
         /// </summary>
         /// <param name="strings">The list of strings.</param>
         /// <returns>The created automata array.</returns>
-        private static StringDistribution[] ToAutomatonArray(IList<string> strings)
+        private static StringDistribution[] ToAutomatonArray(IReadOnlyList<string> strings)
         {
             Debug.Assert(strings != null, "A valid string list must be provided.");
 
@@ -686,28 +684,28 @@ namespace Microsoft.ML.Probabilistic.Factors
         private static readonly ConcurrentDictionary<int, IReadOnlyList<string>> ArgumentCountToNames = 
             new ConcurrentDictionary<int, IReadOnlyList<string>>();
 
-        public static StringDistribution StrAverageConditional(StringDistribution format, IList<string> args)
+        public static StringDistribution StrAverageConditional(StringDistribution format, IReadOnlyList<string> args)
         {
             Argument.CheckIfNotNull(args, "args");
 
             return StringFormatOpBase<TStringFormatOp>.StrAverageConditional(format, args, GetArgumentNames(args.Count));
         }
 
-        public static StringDistribution StrAverageConditional(StringDistribution format, IList<StringDistribution> args)
+        public static StringDistribution StrAverageConditional(StringDistribution format, IReadOnlyList<StringDistribution> args)
         {
             Argument.CheckIfNotNull(args, "args");
 
             return StringFormatOpBase<TStringFormatOp>.StrAverageConditional(format, args, GetArgumentNames(args.Count));
         }
 
-        public static StringDistribution FormatAverageConditional(StringDistribution str, IList<string> args)
+        public static StringDistribution FormatAverageConditional(StringDistribution str, IReadOnlyList<string> args)
         {
             Argument.CheckIfNotNull(args, "args");
 
             return StringFormatOpBase<TStringFormatOp>.FormatAverageConditional(str, args, GetArgumentNames(args.Count));
         }
 
-        public static StringDistribution FormatAverageConditional(StringDistribution str, IList<StringDistribution> args)
+        public static StringDistribution FormatAverageConditional(StringDistribution str, IReadOnlyList<StringDistribution> args)
         {
             Argument.CheckIfNotNull(args, "args");
 
@@ -715,7 +713,7 @@ namespace Microsoft.ML.Probabilistic.Factors
         }
 
         public static TStringDistributionList ArgsAverageConditional<TStringDistributionList>(
-            StringDistribution str, StringDistribution format, IList<StringDistribution> args, TStringDistributionList result)
+            StringDistribution str, StringDistribution format, IReadOnlyList<StringDistribution> args, TStringDistributionList result)
             where TStringDistributionList : class, IList<StringDistribution>
         {
             Argument.CheckIfNotNull(args, "args");
@@ -723,7 +721,7 @@ namespace Microsoft.ML.Probabilistic.Factors
             return StringFormatOpBase<TStringFormatOp>.ArgsAverageConditional(str, format, args, GetArgumentNames(args.Count), result);
         }
 
-        public static StringDistribution ToStrReverseMessage(StringDistribution format, IList<StringDistribution> args)
+        public static StringDistribution ToStrReverseMessage(StringDistribution format, IReadOnlyList<StringDistribution> args)
         {
             Argument.CheckIfNotNull(args, "args");
 
@@ -736,14 +734,14 @@ namespace Microsoft.ML.Probabilistic.Factors
             return 0;
         }
 
-        public static double LogEvidenceRatio(string str, StringDistribution format, IList<StringDistribution> args)
+        public static double LogEvidenceRatio(string str, StringDistribution format, IReadOnlyList<StringDistribution> args)
         {
             Argument.CheckIfNotNull(args, "args");
 
             return StringFormatOpBase<TStringFormatOp>.LogEvidenceRatio(str, format, args, GetArgumentNames(args.Count));
         }
 
-        public static double LogEvidenceRatio(string str, StringDistribution format, IList<string> args)
+        public static double LogEvidenceRatio(string str, StringDistribution format, IReadOnlyList<string> args)
         {
             Argument.CheckIfNotNull(args, "args");
 

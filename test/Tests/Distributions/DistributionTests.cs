@@ -222,6 +222,10 @@ namespace Microsoft.ML.Probabilistic.Tests
             Assert.Equal(2, gamma.GetQuantile(expectedProbLessThan), 1e-10);
             Assert.Equal(0.5, g.GetQuantile(1 - expectedProbLessThan), 1e-10);
 
+            Assert.Equal(0, g.GetProbLessThan(0));
+            Assert.Equal(0, g.GetProbLessThan(double.MinValue));
+            Assert.Equal(0, g.GetProbLessThan(double.NegativeInfinity));
+
             g = GammaPower.FromMeanAndVariance(3, double.PositiveInfinity, -1);
             Assert.Equal(2, g.Shape);
             Assert.Equal(3, g.Rate);
@@ -291,6 +295,14 @@ namespace Microsoft.ML.Probabilistic.Tests
             //Assert.Equal(2.2, m);
             //Assert.Equal(3.3, v);
 
+            foreach (double x in new[] { 1.1, 6.4 })
+            {
+                double probLessThan = g.GetProbLessThan(x);
+                Assert.Equal(probLessThan, g.GetProbBetween(double.NegativeInfinity, x));
+                double quantile = g.GetQuantile(probLessThan);
+                Assert.Equal(System.Math.Max(lowerBound, x), quantile, 1e-4);
+            }
+
             var g2 = new TruncatedGaussian(4.4, 5.5, lowerBound, upperBound);
             DistributionTest(g, g2);
             PointMassTest(g, 7.7);
@@ -339,6 +351,14 @@ namespace Microsoft.ML.Probabilistic.Tests
              */
             Assert.True(MMath.AbsDiff(7.2174, m) < 1e-4);
             Assert.True(MMath.AbsDiff(1.9969, v) < 1e-4);
+
+            foreach (double x in new[] { 1.1, 6.4 })
+            {
+                double probLessThan = g.GetProbLessThan(x);
+                Assert.Equal(probLessThan, g.GetProbBetween(double.NegativeInfinity, x));
+                double quantile = g.GetQuantile(probLessThan);
+                Assert.Equal(System.Math.Max(lowerBound, x), quantile, 1e-4);
+            }
 
             var g2 = new TruncatedGamma(4.4, 5.5, lowerBound, upperBound);
             DistributionTest(g, g2);
@@ -500,9 +520,13 @@ namespace Microsoft.ML.Probabilistic.Tests
             Assert.Equal(2.2, m);
             Assert.Equal(3.3, v);
 
-            double x = 4.4;
-            double probLessThan = g.GetProbLessThan(x);
-            Assert.Equal(MMath.NormalCdf((x - 2.2) / System.Math.Sqrt(3.3)), probLessThan, 1e-4);
+            foreach (double x in new[] { 1.1, 4.4 })
+            {
+                double probLessThan = g.GetProbLessThan(x);
+                Assert.Equal(MMath.NormalCdf((x - m) / System.Math.Sqrt(v)), probLessThan, 1e-4);
+                Assert.Equal(probLessThan, g.GetProbBetween(double.NegativeInfinity, x));
+                Assert.Equal(probLessThan, g.GetProbBetween(2*m - x, double.PositiveInfinity));
+            }
 
             Gaussian g2 = new Gaussian(4.4, 5.5);
             /* Test in matlab:
@@ -773,6 +797,9 @@ namespace Microsoft.ML.Probabilistic.Tests
             GammaMomentTest(g);
             GammaMomentTest(Gamma.FromShapeAndRate(1.7, 2));
             GammaMomentTest(Gamma.PointMass(2.3));
+
+            Assert.Equal(g.GetProbLessThan(0.1), g.GetProbBetween(0, 0.1));
+            Assert.Equal(g.GetProbBetween(0, 0.2), g.GetProbBetween(-1, 0.2));
 
             DistributionTest(g, new Gamma(10, 11));
             PointMassTest(g, 7.7);
@@ -1223,30 +1250,19 @@ namespace Microsoft.ML.Probabilistic.Tests
             Discrete d1 = new Discrete(0.1, 0.9, 0, 0);
             Discrete d2 = new Discrete(0, 0, 0.3, 0.7);
             Assert.True(MMath.AbsDiff(d2.GetAverageLog(d2), 0.3 * System.Math.Log(0.3) + 0.7 * System.Math.Log(0.7), 1 - 6) < 1e-10);
-            try
-            {
-                Discrete d3 = d1 * d2;
-                Assert.True(false, "Did not throw exception");
-            }
-            catch (AllZeroException)
-            {
-            }
-            try
-            {
-                Discrete d3 = new Discrete(0, 0, 0);
-                Assert.True(false, "Did not throw exception");
-            }
-            catch (AllZeroException)
-            {
-            }
-            try
-            {
-                d.SetProbs(Vector.FromArray(0.0, 0.0));
-                Assert.True(false, "Did not throw exception");
-            }
-            catch (AllZeroException)
-            {
-            }
+            Discrete d3 = d1 * d2;
+            Assert.True(d3.IsZero());
+            Assert.False(d3.IsPointMass);
+            Discrete zero = new Discrete(0, 0, 0);
+            Assert.True(zero.IsZero());
+            Assert.False(zero.IsPointMass);
+            zero = Discrete.Zero(3);
+            Assert.True(zero.IsZero());
+            Assert.False(zero.IsPointMass);
+            d.SetProbs(Vector.FromArray(0.0, 0.0));
+            Assert.True(d.IsZero());
+            Assert.False(d.IsPointMass);
+            Assert.Equal(double.NegativeInfinity, d.GetLogAverageOf(d));
 
             d = new Discrete(1.0);
             Assert.Equal(0, d.Sample());
@@ -1310,6 +1326,7 @@ namespace Microsoft.ML.Probabilistic.Tests
         }
 
         [Fact]
+        [Trait("Category", "ModifiesGlobals")]
         public void DirichletTest()
         {
             Vector mTrue = Vector.FromArray(0.1, 0.2, 0.3, 0.4);
@@ -1323,12 +1340,11 @@ namespace Microsoft.ML.Probabilistic.Tests
             Assert.True(mTrue.MaxDiff(m) < 1e-10);
             Assert.True(vTrue.MaxDiff(v) < 1e-10);
 
-            bool save = Dirichlet.AllowImproperSum;
-            Dirichlet.AllowImproperSum = false;
             DistributionTest(d, Dirichlet.Symmetric(d.Dimension, 7.7));
-            Dirichlet.AllowImproperSum = true;
-            DistributionTest(d, Dirichlet.Symmetric(d.Dimension, 7.7));
-            Dirichlet.AllowImproperSum = save;
+            using (TestUtils.TemporarilyAllowDirichletImproperSums)
+            {
+                DistributionTest(d, Dirichlet.Symmetric(d.Dimension, 7.7));
+            }
             PointMassTest(d, mTrue);
             UniformTest(d, mTrue);
             SetMomentTest(d, mTrue, vTrue);
@@ -1515,7 +1531,8 @@ namespace Microsoft.ML.Probabilistic.Tests
         public void BetaTest()
         {
             Beta d = new Beta(0.2, 0.1);
-
+            Assert.Equal(d.GetProbLessThan(0.1), d.GetProbBetween(0, 0.1));
+            Assert.Equal(d.GetProbBetween(0, 0.2), d.GetProbBetween(-1, 0.2));
             DistributionTest(d, new Beta(4.4, 3.3));
             using (TestUtils.TemporarilyAllowBetaImproperSums)
             {
@@ -1921,7 +1938,7 @@ namespace Microsoft.ML.Probabilistic.Tests
             PointMassSampleTest(distribution, value);
         }
 
-        // Generic high-level tests ///////////////////////////////////////////////////////////////////////////
+        #region Generic high-level tests 
 
         internal static void DistributionTest<T>(T a, T b, bool doSumWithNegativeWeightsTests = true)
             where T : SettableToProduct<T>, SettableToRatio<T>, SettableToPower<T>, SettableToUniform, SettableToWeightedSum<T>,
@@ -2074,7 +2091,9 @@ namespace Microsoft.ML.Probabilistic.Tests
             SetMomentTest(a, mean, variance);
         }
 
-        // Helper tests ///////////////////////////////////////////////////////////////////////////
+        #endregion
+
+        #region Helper tests
 
         private static void InnerProductWithUniformTest<DomainType, T>(T a, DomainType value)
             where T : CanGetLogAverageOf<T>, CanGetLogAverageOfPower<T>, SettableToUniform, ICloneable, CanGetLogProb<DomainType>
@@ -2464,6 +2483,8 @@ namespace Microsoft.ML.Probabilistic.Tests
             else
                 throw new NotImplementedException();
         }
+
+        #endregion
     }
 
 #if SUPPRESS_UNREACHABLE_CODE_WARNINGS

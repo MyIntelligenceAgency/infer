@@ -69,12 +69,43 @@ namespace Microsoft.ML.Probabilistic.Tests
             double point = 2;
             est.Add(point);
             Assert.Equal(point, est.GetQuantile(0.5));
+            Assert.Equal(0.0, est.GetProbLessThan(point));
 
             OuterQuantiles outer = new OuterQuantiles(new[] { point });
             Assert.Equal(point, outer.GetQuantile(0.5));
+            Assert.Equal(0.0, outer.GetProbLessThan(point));
 
             InnerQuantiles inner = new InnerQuantiles(new[] { point });
             Assert.Equal(point, inner.GetQuantile(0.5));
+            Assert.Equal(0.5, inner.GetProbLessThan(point));
+        }
+
+        [Fact]
+        public void OuterQuantiles_HandlesExtremeValues()
+        {
+            OuterQuantiles outer = new OuterQuantiles(new[] { -double.MaxValue, double.MaxValue });
+            IrregularQuantiles irregular = new IrregularQuantiles(new[] { 0.0, 1.0 }, new[] { -double.MaxValue, double.MaxValue });
+            foreach (var example in new[] {
+                ((0.5 + 1) / 2, double.MaxValue / 2),
+                (0.5, 0)
+            })
+            {
+                Assert.Equal(example.Item1, outer.GetProbLessThan(example.Item2));
+                CheckGetQuantile(outer, outer, example.Item1);
+
+                Assert.Equal(example.Item1, irregular.GetProbLessThan(example.Item2));
+                CheckGetQuantile(irregular, irregular, example.Item1);
+            }
+
+            InnerQuantiles inner = new InnerQuantiles(new[] { -double.MaxValue, double.MaxValue });
+            foreach (var example in new[] {
+                ((1 + (0.5 + 1) / 2) / 3, double.MaxValue / 2),
+                (0.5, 0)
+            })
+            {
+                Assert.Equal(example.Item1, inner.GetProbLessThan(example.Item2));
+                CheckGetQuantile(inner, inner, example.Item1);
+            }
         }
 
         /// <summary>
@@ -337,19 +368,24 @@ namespace Microsoft.ML.Probabilistic.Tests
             CheckGetQuantile(inner, inner, (int)Math.Ceiling(100.0 / 8), (int)Math.Floor(100.0 * 7 / 8));
         }
 
-        internal void CheckGetQuantile(CanGetQuantile canGetQuantile, CanGetProbLessThan canGetProbLessThan, int minPercent = 0, int maxPercent = 100)
+        internal void CheckGetQuantile(CanGetQuantile<double> canGetQuantile, CanGetProbLessThan<double> canGetProbLessThan, int minPercent = 0, int maxPercent = 100)
         {
             for (int i = minPercent; i < maxPercent; i++)
             {
                 // probability = 1.0 is excluded
                 double probability = i / 100.0;
-                double x = canGetQuantile.GetQuantile(probability);
-                double probLessThanX = canGetProbLessThan.GetProbLessThan(x);
-                Assert.True(probLessThanX <= probability);
-                double next = MMath.NextDouble(x);
-                double probLessThanNext = canGetProbLessThan.GetProbLessThan(next);
-                Assert.True(probLessThanNext > probability);
+                CheckGetQuantile(canGetQuantile, canGetProbLessThan, probability);
             }
+        }
+
+        private static void CheckGetQuantile(CanGetQuantile<double> canGetQuantile, CanGetProbLessThan<double> canGetProbLessThan, double probability)
+        {
+            double x = canGetQuantile.GetQuantile(probability);
+            double probLessThanX = canGetProbLessThan.GetProbLessThan(x);
+            Assert.True(probLessThanX <= probability);
+            double next = MMath.NextDouble(x);
+            double probLessThanNext = canGetProbLessThan.GetProbLessThan(next);
+            Assert.True(probLessThanNext > probability);
         }
 
         [Fact]
@@ -483,7 +519,7 @@ namespace Microsoft.ML.Probabilistic.Tests
             CheckProbLessThan(est, x, maximumError);
         }
 
-        private void CheckProbLessThan(CanGetProbLessThan canGetProbLessThan, List<double> x, double maximumError)
+        private void CheckProbLessThan(CanGetProbLessThan<double> canGetProbLessThan, List<double> x, double maximumError)
         {
             x.Sort();
             var sortedData = new OuterQuantiles(x.ToArray());

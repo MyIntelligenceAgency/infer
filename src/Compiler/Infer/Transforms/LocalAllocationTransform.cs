@@ -11,7 +11,6 @@ using Microsoft.ML.Probabilistic.Collections;
 using Microsoft.ML.Probabilistic.Compiler.Attributes;
 using Microsoft.ML.Probabilistic.Compiler.Graphs;
 using Microsoft.ML.Probabilistic.Utilities;
-using Microsoft.ML.Probabilistic.Compiler;
 using Microsoft.ML.Probabilistic.Compiler.CodeModel;
 using NodeIndex = System.Int32;
 using EdgeIndex = System.Int32;
@@ -38,7 +37,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
         }
 
         internal static bool debug;
-        private ModelCompiler compiler;
+        private readonly ModelCompiler compiler;
         private LoopMergingInfo loopMergingInfo;
         private DependencyGraph2 g;
         private IndexedGraph dependencyGraph;
@@ -74,7 +73,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
             IMethodDeclaration imd = context.FindAncestor<IMethodDeclaration>();
             loopMergingInfo = context.InputAttributes.Get<LoopMergingInfo>(imd);
             List<IWhileStatement> whileStatements = new List<IWhileStatement>();
-            Set<IStatement> initializerStatements = new Set<IStatement>(new IdentityComparer<IStatement>());
+            Set<IStatement> initializerStatements = new Set<IStatement>(ReferenceEqualityComparer<IStatement>.Instance);
             List<int> whileNumberOfNode = new List<int>();
             // the number of containers that must be shared with the previous statement.
             List<int> sharedContainerCountOfNode = new List<NodeIndex>();
@@ -627,7 +626,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
                         CloneInfos info = cloneInfosOfNode[node];
                         IStatement initSt = nodes[node];
                         Set<IVariableDeclaration> mutatedVariables = GetMutatedVariables(initSt);
-                        Set<IVariableDeclaration> newMutatedVariables = new Set<IVariableDeclaration>(new IdentityComparer<IVariableDeclaration>());
+                        Set<IVariableDeclaration> newMutatedVariables = new Set<IVariableDeclaration>(ReferenceEqualityComparer<IVariableDeclaration>.Instance);
                         foreach (var entry in info.targetsByReversedLoops)
                         {
                             var reversedLoops = entry.Key;
@@ -904,7 +903,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
         private bool CheckNodesAreUnique()
         {
             // check all non-null nodes are unique
-            Set<IStatement> stmts = new Set<IStatement>(new IdentityComparer<IStatement>());
+            Set<IStatement> stmts = new Set<IStatement>(ReferenceEqualityComparer<IStatement>.Instance);
             foreach (var ist in nodes)
             {
                 if (ist == null)
@@ -961,7 +960,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
 
         private class Replacements
         {
-            public Dictionary<IStatement, IStatement> statementReplacements = new Dictionary<IStatement, IStatement>(new IdentityComparer<IStatement>());
+            public Dictionary<IStatement, IStatement> statementReplacements = new Dictionary<IStatement, IStatement>(ReferenceEqualityComparer<IStatement>.Instance);
             public Dictionary<IVariableDeclaration, IVariableDeclaration> variableReplacements = new Dictionary<IVariableDeclaration, IVariableDeclaration>();
 
             public int Count
@@ -1117,7 +1116,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
 
         private Set<IVariableDeclaration> GetMutatedVariables(IStatement stmt)
         {
-            Set<IVariableDeclaration> mutatedVariables = new Set<IVariableDeclaration>(new IdentityComparer<IVariableDeclaration>());
+            Set<IVariableDeclaration> mutatedVariables = new Set<IVariableDeclaration>(ReferenceEqualityComparer<IVariableDeclaration>.Instance);
             ForEachInitializerStatement(stmt, init =>
             {
                 if (init is IExpressionStatement)

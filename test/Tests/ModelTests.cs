@@ -49,6 +49,23 @@ namespace Microsoft.ML.Probabilistic.Tests
         }
 
         /// <summary>
+        /// Tests a model where the compiler generates redundant assignments.
+        /// </summary>
+        internal void RedundantAssignmentTest()
+        {
+            var r = new Range(10).Named("range");
+            var x = Variable<double>.Array(r).Named("variable_array");
+            using (var t1 = Variable.ForEach(r))
+            {
+                x[t1.Index] = Variable.GaussianFromMeanAndPrecision(0, 1);
+            }
+
+            var inferenceEngine = new InferenceEngine { ShowFactorGraph = false, Algorithm = new ExpectationPropagation(), NumberOfIterations = 10 };
+
+            inferenceEngine.Infer<Gaussian[]>(x);
+        }
+
+        /// <summary>
         /// The "Eight Schools" example from https://mc-stan.org/users/documentation/case-studies/divergences_and_bias.html
         /// </summary>
         [Fact]
@@ -1316,9 +1333,7 @@ namespace Microsoft.ML.Probabilistic.Tests
             Range d = new Range(3).Named("d");
 
 
-            ///////////////////////
             // Node 1
-            ///////////////////////
 
             // Mixture component means
             var means1 = Variable.Array(Variable.Array<double>(d), k);
@@ -1364,9 +1379,7 @@ namespace Microsoft.ML.Probabilistic.Tests
             z.InitialiseTo(Distribution<int>.Array(zinit));
 
 
-            /////////////////////////////
             // Node 2
-            /////////////////////////////
 
             // Mixture component means
             var means2 = Variable.Array(Variable.Array<double>(d), k).Named("mean2");
@@ -1422,7 +1435,6 @@ namespace Microsoft.ML.Probabilistic.Tests
             z2.InitialiseTo(Distribution<int>.Array(zinit2));
 
 
-            /////////////////////////////
 
 
             // The inference
@@ -2895,7 +2907,7 @@ namespace Microsoft.ML.Probabilistic.Tests
         public void VariableOfGenericType()
         {
             Variable<List<double>> a = Variable.Constant(new List<double>(new double[] { 5 }));
-            Variable<double> y = Variable<double>.Factor(Factor.GetItem, a, 0);
+            Variable<double> y = Variable<double>.Factor(Collection.GetItem, a, 0);
             Variable<double> x = Variable.GaussianFromMeanAndVariance(y, 1);
             InferenceEngine engine = new InferenceEngine();
             Gaussian xActual = engine.Infer<Gaussian>(x);
@@ -3733,7 +3745,7 @@ namespace Microsoft.ML.Probabilistic.Tests
         [Fact]
         public void ClickChainTest()
         {
-            try
+            Assert.Throws<CompilationFailedException>(() =>
             {
                 // observation[rank][user] 
                 //bool[][] observation = { new bool[] { false }, new bool[] { false }, new bool[] { true } };
@@ -3791,11 +3803,7 @@ namespace Microsoft.ML.Probabilistic.Tests
                     //  Console.WriteLine("Relevance of document " +i +": "+ ie.Infer(rel));
                     Console.WriteLine("Relevance of document {0}: {1}", i, ie.Infer(rel[i]));
                 }
-            }
-            catch (CompilationFailedException ex)
-            {
-                Console.WriteLine("Correctly threw " + ex);
-            }
+            });
         }
 
         /// <summary>

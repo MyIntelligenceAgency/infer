@@ -57,15 +57,14 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
         /// <summary>
         /// Fields that will always be re-allocated whenever they change.
         /// </summary>
-        private Set<string> reallocatedVariables = new Set<string>();
+        private readonly Set<string> reallocatedVariables = new Set<string>();
 
-        private Dictionary<object, IFieldDeclaration> fieldDeclarations = new Dictionary<object, IFieldDeclaration>();
-        private Dictionary<IParameterDeclaration, IList<IStatement>> propertySetterStatements = new Dictionary<IParameterDeclaration, IList<IStatement>>();
+        private readonly Dictionary<object, IFieldDeclaration> fieldDeclarations = new Dictionary<object, IFieldDeclaration>();
+        private readonly Dictionary<IParameterDeclaration, IList<IStatement>> propertySetterStatements = new Dictionary<IParameterDeclaration, IList<IStatement>>();
         private IList<IStatement> marginalMethodStmts, marginalQueryMethodStmts;
         private IList<IStatement> marginalTMethodStmts, marginalQueryTMethodStmts;
-        private IExpression marginalVariableName, marginalTVariableName, marginalQueryVariableName, marginalQuery;
+        private IExpression marginalVariableName, marginalQueryVariableName, marginalQuery;
         private IGenericParameter marginalType, marginalQueryType;
-        private IExpression marginalQueryTVariableName, marginalTQuery;
         private IExpression setObservedVariableName, setObservedValue, getObservedVariableName;
         private IList<IStatement> setObservedValueMethodStmts, getObservedValueMethodStmts;
 
@@ -195,9 +194,8 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
             context.AddMember(fd);
             td.Fields.Add(fd);
             fieldDeclarations[ipd] = fd;
-            IExpression value;
             IFieldReferenceExpression fre = Builder.FieldRefExpr(fd);
-            IPropertyDeclaration prop = Builder.PropDecl(ipd.Name, ipd.ParameterType.DotNetType, td, MethodVisibility.Public, MethodVisibility.Public, out value);
+            IPropertyDeclaration prop = Builder.PropDecl(ipd.Name, ipd.ParameterType.DotNetType, td, MethodVisibility.Public, MethodVisibility.Public, out IExpression value);
             prop.Documentation = "The externally-specified value of '" + ipd.Name + "'";
             ((IMethodDeclaration)prop.GetMethod).Body.Statements.Add(Builder.Return(fre));
             IList<IStatement> setStmts = ((IMethodDeclaration)prop.SetMethod).Body.Statements;
@@ -213,10 +211,9 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
                 IExpression condition;
                 if (type.IsValueType && !HasOperator(type, "op_Inequality"))
                 {
-                    Exception exception;
-                    MethodInfo mi = (MethodInfo)Microsoft.ML.Probabilistic.Compiler.Reflection.Invoker.GetBestMethod(type, "Equals",
-                                                                                         BindingFlags.Public | BindingFlags.Instance | BindingFlags.InvokeMethod,
-                                                                                         type, new Type[] { type }, out exception);
+                    MethodInfo mi = (MethodInfo)Reflection.Invoker.GetBestMethod(type, "Equals",
+                        BindingFlags.Public | BindingFlags.Instance | BindingFlags.InvokeMethod,
+                        type, new Type[] { type }, out Exception exception);
                     condition = Builder.NotExpr(Builder.Method(fre, mi, value));
                 }
                 else
@@ -308,9 +305,8 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
         {
             try
             {
-                Exception exception;
-                Microsoft.ML.Probabilistic.Compiler.Reflection.Invoker.GetBestMethod(type, name, BindingFlags.Public | BindingFlags.Static | BindingFlags.InvokeMethod | BindingFlags.FlattenHierarchy,
-                                                        null, new Type[] { type, type }, out exception);
+                Reflection.Invoker.GetBestMethod(type, name, BindingFlags.Public | BindingFlags.Static | BindingFlags.InvokeMethod | BindingFlags.FlattenHierarchy,
+                                                        null, new Type[] { type, type }, out Exception exception);
                 return true;
             }
             catch (MissingMethodException)
@@ -351,7 +347,6 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
         protected IMethodDeclaration MakeGenericMarginalMethod(IMethodDeclaration marginalMethod)
         {
             IParameterDeclaration variableNameDecl = Builder.Param("variableName", typeof(string));
-            marginalTVariableName = Builder.ParamRef(variableNameDecl);
             marginalType = Builder.GenericTypeParam("T");
             IMethodDeclaration method = Builder.GenericMethodDecl(MethodVisibility.Public, "Marginal", marginalType, marginalMethod.DeclaringType,
                                                                                  new IGenericParameter[] { marginalType }, variableNameDecl);
@@ -394,9 +389,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
         protected IMethodDeclaration MakeGenericMarginalQueryMethod(IMethodDeclaration marginalQueryMethod)
         {
             IParameterDeclaration variableNameDecl = Builder.Param("variableName", typeof(string));
-            marginalQueryTVariableName = Builder.ParamRef(variableNameDecl);
             IParameterDeclaration queryDecl = Builder.Param("query", typeof(string));
-            marginalTQuery = Builder.ParamRef(queryDecl);
             marginalQueryType = Builder.GenericTypeParam("T");
             IMethodDeclaration method = Builder.GenericMethodDecl(MethodVisibility.Public, "Marginal", marginalQueryType, marginalQueryMethod.DeclaringType,
                                                                                       new IGenericParameter[] { marginalQueryType }, variableNameDecl, queryDecl);
@@ -493,12 +486,12 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
             IndexedProperty<NodeIndex, Set<IParameterDeclaration>> parameterDependencies = dependencyGraph.CreateNodeData<Set<IParameterDeclaration>>(null);
             // stores virtual dependency edges along which parameterDeps should flow
             IndexedProperty<NodeIndex, Set<NodeIndex>> containerDependencies = dependencyGraph.CreateNodeData<Set<NodeIndex>>(null);
-            Dictionary<IStatement, int> indexOfNode = new Dictionary<IStatement, int>(new IdentityComparer<IStatement>());
+            Dictionary<IStatement, int> indexOfNode = new Dictionary<IStatement, int>(ReferenceEqualityComparer<IStatement>.Instance);
             Set<NodeIndex> inputNodes = new Set<NodeIndex>();
             Set<NodeIndex> loopNodes = new Set<NodeIndex>();
             int whileNodeIndex = -1;
             bool hasBackEdges = false;
-            Action<IStatement> addStatementToGraph = delegate (IStatement ist)
+            void addStatementToGraph(IStatement ist)
             {
                 int targetIndex;
                 if (whileNodeIndex == -1)
@@ -560,8 +553,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
                             DependencyInformation di2 = context.InputAttributes.Get<DependencyInformation>(source2);
                             foreach (IStatement init in di2.Overwrites)
                             {
-                                int initIndex;
-                                if (indexOfNode.TryGetValue(init, out initIndex))
+                                if (indexOfNode.TryGetValue(init, out int initIndex))
                                 {
                                     if (!sources.Contains(initIndex))
                                     {
@@ -583,7 +575,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
                 // Additionally, if the statement is an assignment whose lhs is indexed by a parameter, then we need to re-execute the initializer statements
                 // when the parameter changes.  This case is also handled by GetConditionAndTargetIndexExpressions.
                 Set<IParameterDeclaration> parametersUsedInCondition =
-                    new Set<IParameterDeclaration>(new IdentityComparer<IParameterDeclaration>());
+                    new Set<IParameterDeclaration>(ReferenceEqualityComparer<IParameterDeclaration>.Instance);
                 parametersUsedInCondition.AddRange(Recognizer.GetConditionAndTargetIndexExpressions(ist)
                     .SelectMany(Recognizer.GetArgumentReferenceExpressions)
                     .Select(iare => iare.Parameter.Resolve()));
@@ -605,8 +597,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
                             }
                             foreach (IStatement dependencyStmt in di.ContainerDependencies)
                             {
-                                NodeIndex dependency;
-                                if (indexOfNode.TryGetValue(dependencyStmt, out dependency))
+                                if (indexOfNode.TryGetValue(dependencyStmt, out int dependency))
                                     containerDeps.Add(dependency);
                             }
                         }
@@ -614,13 +605,13 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
                 }
                 // the same statement may appear multiple times.  when looking up indexOfNode, we want to use the last occurrence of the statement.
                 indexOfNode[ist] = targetIndex; // must do this at the end, in case the stmt depends on a previous occurrence of itself
-            };
+            }
             DeadCodeTransform.ForEachStatement(inputs, delegate (IWhileStatement iws)
             {
                 nodes.Add(iws);
                 whileNodeIndex = dependencyGraph.AddNode();
                 indexOfNode[iws] = whileNodeIndex;
-                Set<IParameterDeclaration> parameterDeps = new Set<IParameterDeclaration>(new IdentityComparer<IParameterDeclaration>());
+                Set<IParameterDeclaration> parameterDeps = new Set<IParameterDeclaration>(ReferenceEqualityComparer<IParameterDeclaration>.Instance);
                 parameterDependencies[whileNodeIndex] = parameterDeps;
                 if (IsConvergenceLoop(iws))
                 {
@@ -675,9 +666,8 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
                 if (compiler.ReturnCopies)
                 {
                     IStatement ist = nodes[target];
-                    if (ist is IExpressionStatement)
+                    if (ist is IExpressionStatement ies)
                     {
-                        IExpressionStatement ies = (IExpressionStatement)ist;
                         IExpression expr = ies.Expression;
                         if (expr is IAssignExpression)
                         {
@@ -778,7 +768,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
                             persistentVars.Add(ivd);
                     });
                 }
-                Action<Edge<EdgeIndex>> inheritDeps = delegate (Edge<EdgeIndex> edge)
+                void inheritDeps(Edge<EdgeIndex> edge)
                 {
                     // the target of the edge is the source node in the dependency, thus we are propagating upwards.
                     // by propagating upwards, we force earlier statements to be included in the same subroutine.
@@ -790,7 +780,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
                         if (debug)
                             AddParameterDependencyMessage(nodes[edge.Target], $"{parameterDependencies[edge.Target]} upward inherited from {nodes[edge.Source]}");
                     }
-                };
+                }
                 dfs.TreeEdge += inheritDeps;
                 dfs.CrossEdge += inheritDeps;
                 // because we are propagating dependencies in both directions, we need to iterate until convergence
@@ -813,7 +803,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
                 {
                     Set<IParameterDeclaration> initParams = initParameters[sourceIndex];
                     if (initParams == null)
-                        initParams = new Set<IParameterDeclaration>(new IdentityComparer<IParameterDeclaration>());
+                        initParams = new Set<IParameterDeclaration>(ReferenceEqualityComparer<IParameterDeclaration>.Instance);
                     initParams.AddRange(parameterDeps);
                     if (!hasLoopAncestor[loopNode])
                     {
@@ -886,7 +876,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
             // use the parameter dependencies to define subroutines
             List<Subroutine> subroutines = new List<Subroutine>();
             Dictionary<SubroutineDependencies, int> indexOfSubroutine = new Dictionary<SubroutineDependencies, int>();
-            Set<IParameterDeclaration> emptySet = new Set<IParameterDeclaration>(new IdentityComparer<IParameterDeclaration>());
+            Set<IParameterDeclaration> emptySet = new Set<IParameterDeclaration>(ReferenceEqualityComparer<IParameterDeclaration>.Instance);
             // loop statements in their original order
             foreach (NodeIndex target in dependencyGraph.Nodes)
             {
@@ -1040,9 +1030,9 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
                         // not in the loop
                         initializers.Add(initIndex);
                         IStatement node = nodes[initIndex];
-                        if (node is IWhileStatement)
+                        if (node is IWhileStatement iws)
                         {
-                            AddLoopInitializers((IWhileStatement)node, initIndex, initializers, indexOfNode, nodes);
+                            AddLoopInitializers(iws, initIndex, initializers, indexOfNode, nodes);
                         }
                     }
                 }
@@ -1164,11 +1154,11 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
             }
             IConditionStatement cs = Builder.CondStmt(quitExpr, Builder.BlockStmt());
             cs.Then.Statements.Add(Builder.Return());
-            Action<IStatement> addStmt = delegate (IStatement ist)
+            void addStmt(IStatement ist)
             {
                 methodStmts.Add(ist);
                 loopMergingInfo.AddNode(ist);
-            };
+            }
             addStmt(cs);
             currentSubroutine = sub;
             foreach (NodeIndex nodeIndex in sub.statements)
@@ -1210,9 +1200,8 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
         /// <param name="action"></param>
         private void ForEachDeclaration(IStatement ist, Action<IVariableDeclaration> action)
         {
-            if (ist is IExpressionStatement)
+            if (ist is IExpressionStatement ies)
             {
-                IExpressionStatement ies = (IExpressionStatement)ist;
                 IExpression expr = ies.Expression;
                 if (expr is IAssignExpression)
                 {
@@ -1226,17 +1215,15 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
                         action(ivd);
                 }
             }
-            else if (ist is IConditionStatement)
+            else if (ist is IConditionStatement ics)
             {
-                IConditionStatement ics = (IConditionStatement)ist;
                 foreach (IStatement st in ics.Then.Statements)
                 {
                     ForEachDeclaration(st, action);
                 }
             }
-            else if (ist is IForStatement)
+            else if (ist is IForStatement ifs)
             {
-                IForStatement ifs = (IForStatement)ist;
                 foreach (IStatement st in ifs.Body.Statements)
                 {
                     ForEachDeclaration(st, action);
@@ -1414,8 +1401,9 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
         }
 
         Set<T> AddParameterDependencies<T>(Set<T> set, IEnumerable<T> itemsToAdd)
+            where T : class
         {
-            var result = Set<T>.FromEnumerable(new IdentityComparer<T>(), set);
+            var result = Set<T>.FromEnumerable(ReferenceEqualityComparer<T>.Instance, set);
             result.AddRange(itemsToAdd);
             return result;
         }
@@ -1574,8 +1562,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
         protected override IExpression ConvertArgumentRef(IArgumentReferenceExpression iare)
         {
             IParameterDeclaration ipd = iare.Parameter.Resolve();
-            IFieldDeclaration ifd;
-            if (fieldDeclarations.TryGetValue(ipd, out ifd))
+            if (fieldDeclarations.TryGetValue(ipd, out IFieldDeclaration ifd))
                 return Builder.FieldRefExpr(ifd);
             else
                 return iare;
@@ -1584,8 +1571,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
         protected override IExpression ConvertVariableRefExpr(IVariableReferenceExpression ivre)
         {
             IVariableDeclaration ivd = ivre.Variable.Resolve();
-            IFieldDeclaration ifd;
-            if (fieldDeclarations.TryGetValue(ivd, out ifd))
+            if (fieldDeclarations.TryGetValue(ivd, out IFieldDeclaration ifd))
                 return Builder.FieldRefExpr(ifd);
             // If no field declaration is associated with the variable, leave it as a local variable
             // e.g. for index variables in loops.
@@ -1605,19 +1591,20 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
         }
 
 
-        private void processQualityBand(IExpression ie)
+        private void ProcessQualityBand(IExpression ie)
         {
             QualityBandCompilerAttribute qual = context.InputAttributes.Get<QualityBandCompilerAttribute>(ie);
             // Catch any quality attributes not handled by the transforms:
             if (qual == null)
             {
-                if (ie is IVariableDeclarationExpression)
+                if (ie is IVariableDeclarationExpression ivde)
                 {
-                    IVariableDeclarationExpression ivde = (IVariableDeclarationExpression)ie;
                     Type ty = ivde.GetExpressionType();
                     if (Distribution.HasDistributionType(ty))
+                    {
                         // (1) If a distribution type, then get the quality whether unknown or known
                         qual = new QualityBandCompilerAttribute(Distribution.GetQualityBand(ty));
+                    }
                     else
                     {
                         // (2) If a non-distribution type, only handle if there is a non-unknown quality
@@ -1626,10 +1613,9 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
                             qual = new QualityBandCompilerAttribute(qb);
                     }
                 }
-                else if (ie is IMethodInvokeExpression)
+                else if (ie is IMethodInvokeExpression imie) 
                 {
                     // (3) If a method reference, only handle if there is a non-unknown quality
-                    IMethodInvokeExpression imie = (IMethodInvokeExpression)ie;
                     IMethodReference imr = imie.Method.Method;
                     QualityBand qb = Quality.GetQualityBand(imr.MethodInfo);
                     if (qb != QualityBand.Unknown)
@@ -1652,7 +1638,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
 
         protected override IExpression ConvertMethodInvoke(IMethodInvokeExpression imie)
         {
-            processQualityBand(imie);
+            ProcessQualityBand(imie);
             foreach (var ivd in Recognizer.GetVariables(imie))
             {
                 MessageArrayInformation mai = context.InputAttributes.Get<MessageArrayInformation>(ivd);
@@ -1708,15 +1694,15 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
             int rank = iaie.Indices.Count;
             bool isDistribution = Distribution.IsDistributionType(type);
             if (isDistribution)
-                type = Distributions.Distribution.MakeDistributionArrayType(type, rank);
+                type = Distribution.MakeDistributionArrayType(type, rank);
             else
                 type = Util.MakeArrayType(type, rank);
-            while (iaie.Target is IArrayIndexerExpression)
+            while (iaie.Target is IArrayIndexerExpression target)
             {
-                iaie = (IArrayIndexerExpression)iaie.Target;
+                iaie = target;
                 rank = iaie.Indices.Count;
                 if (isDistribution)
-                    type = Distributions.Distribution.MakeDistributionArrayType(type, rank);
+                    type = Distribution.MakeDistributionArrayType(type, rank);
                 else
                     type = Util.MakeArrayType(type, rank);
             }
@@ -1868,7 +1854,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
             if (isLoopVar)
                 return base.ConvertVariableDeclExpr(ivde);
             bool isLhs = (context.FindAncestorIndex<IExpressionStatement>() == context.Depth - 2);
-            processQualityBand(ivde);
+            ProcessQualityBand(ivde);
             IVariableDeclaration ivd = ivde.Variable;
             DescriptionAttribute da = context.GetAttribute<DescriptionAttribute>(ivd);
             if (compiler.FreeMemory && !persistentVars.Contains(ivd))

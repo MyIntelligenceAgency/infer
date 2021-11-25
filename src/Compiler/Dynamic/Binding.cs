@@ -14,10 +14,6 @@ using Microsoft.ML.Probabilistic.Collections;
 
 namespace Microsoft.ML.Probabilistic.Compiler.Reflection
 {
-#if SUPPRESS_XMLDOC_WARNINGS
-#pragma warning disable 1591
-#endif
-
     /// <summary>
     /// Represents the type parameters and argument conversions needed to invoke a method.
     /// </summary>
@@ -38,12 +34,12 @@ namespace Microsoft.ML.Probabilistic.Compiler.Reflection
         /// The type inferred for each type parameter.
         /// </summary>
         /// <remarks>All entries are non-null.  A missing entry indicates an unconstrained parameter.</remarks>
-        public IDictionary<Type, Type> Types;
+        public readonly Dictionary<Type, Type> Types;
 
         /// <summary>
         /// The conversion inferred for each method parameter position.
         /// </summary>
-        public Conversion[] Conversions;
+        public readonly Conversion[] Conversions;
 
         /// <summary>
         /// Array indexing depth needed to obtain a match.
@@ -119,10 +115,6 @@ namespace Microsoft.ML.Probabilistic.Compiler.Reflection
             }
         }
 
-#if SUPPRESS_UNREACHABLE_CODE_WARNINGS
-#pragma warning disable 162
-#endif
-
         /// <summary>
         /// Find the most specific Binding for a generic method.
         /// </summary>
@@ -139,7 +131,8 @@ namespace Microsoft.ML.Probabilistic.Compiler.Reflection
             {
                 exception = errors[0];
                 string message = exception.Message + " of method ";
-                if (true)
+                bool useShortString = true;
+                if (useShortString)
                 {
                     message += GetParameterMismatchString(method, actuals);
                 }
@@ -169,10 +162,6 @@ namespace Microsoft.ML.Probabilistic.Compiler.Reflection
             //if (iter.MoveNext()) throw new System.Reflection.AmbiguousMatchException();
             return best;
         }
-
-#if SUPPRESS_UNREACHABLE_CODE_WARNINGS
-#pragma warning restore 162
-#endif
 
         /// <summary>
         /// True if the binding has no explicit conversions (excluding the first) and at most one nonzero conversion.
@@ -461,10 +450,6 @@ namespace Microsoft.ML.Probabilistic.Compiler.Reflection
             }
         }
 
-#if SUPPRESS_UNREACHABLE_CODE_WARNINGS
-#pragma warning disable 162
-#endif
-
         /// <summary>
         /// Infer type parameter bindings.
         /// </summary>
@@ -518,7 +503,8 @@ namespace Microsoft.ML.Probabilistic.Compiler.Reflection
                             foreach (Type alternate in TypesAssignableFrom(actual))
                             {
                                 binding.Types[formal] = alternate;
-                                if (true)
+                                bool checkConstraints = true;
+                                if (checkConstraints)
                                 {
                                     // check right away if this binding satisfies the constraints on formal.
                                     // this can sometimes improve performance.
@@ -551,12 +537,11 @@ namespace Microsoft.ML.Probabilistic.Compiler.Reflection
             if (isReplaced || !formal.ContainsGenericParameters || actual == typeof(Nullable) || GenericParameterFactory.IsConstructedParameter(actual))
             {
                 // no more substitutions are possible in formal.
-                Conversion conv;
                 if (formal.Equals(actual) || GenericParameterFactory.IsConstructedParameter(actual))
                 {
                     yield return binding;
                 }
-                else if (allowSubtype && conversionOptions.TryGetConversion(actual, formal, out conv))
+                else if (allowSubtype && conversionOptions.TryGetConversion(actual, formal, position, out Conversion conv))
                 {
                     Conversion oldConversion = new Conversion();
                     if (position >= 0)
@@ -632,7 +617,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Reflection
                     choices = new Type[] { actual };
                 }
                 Type[] formalDefArgs = formalGenericTypeDefinition.GetGenericArguments();
-                Func<int, bool> parameterIsCovariant = i => (formalDefArgs[i].GenericParameterAttributes & GenericParameterAttributes.Covariant) != 0;
+                bool parameterIsCovariant(int i) => (formalDefArgs[i].GenericParameterAttributes & GenericParameterAttributes.Covariant) != 0;
                 int subclassCount = 0;
                 bool anyMatch = false;
                 List<Exception> innerErrors = new List<Exception>();
@@ -664,7 +649,8 @@ namespace Microsoft.ML.Probabilistic.Compiler.Reflection
                 if (!anyMatch || innerErrors.Count > 0)
                 {
                     string formalString = StringUtil.TypeToString(formal);
-                    if (false)
+                    bool usePreciseMessage = false;
+                    if (usePreciseMessage)
                     {
                         // this block tries to make the error message more precise.
                         // however it can significantly slow down the code due to exceptions being thrown.
@@ -693,10 +679,6 @@ namespace Microsoft.ML.Probabilistic.Compiler.Reflection
                 }
             }
         }
-
-#if SUPPRESS_UNREACHABLE_CODE_WARNINGS
-#pragma warning restore 162
-#endif
 
         protected static string PositionString(int position)
         {
@@ -763,14 +745,13 @@ namespace Microsoft.ML.Probabilistic.Compiler.Reflection
         /// <param name="type">A type which may have generic parameters.</param>
         /// <param name="typeMap">A dictionary for mapping types</param>
         /// <returns>A type with possibly fewer generic parameters.</returns>
-        public static Type ReplaceTypeParameters(Type type, IDictionary<Type, Type> typeMap)
+        public static Type ReplaceTypeParameters(Type type, IReadOnlyDictionary<Type, Type> typeMap)
         {
             if (type == null) return null;
             else if (!type.ContainsGenericParameters) return type;
             else if (type.IsGenericParameter)
             {
-                Type actual;
-                if (typeMap.TryGetValue(type, out actual)) return actual;
+                if (typeMap.TryGetValue(type, out Type actual)) return actual;
                 else return type;
             }
             else if (type.IsArray)
@@ -842,10 +823,9 @@ namespace Microsoft.ML.Probabilistic.Compiler.Reflection
                 if (!arg.IsGenericParameter) return arg;
                 else
                 {
-                    Type bound;
                     // if the actuals contain constructed type parameters, then these may also be bound, so
                     // we need to call Bind(bound)
-                    if (Types.TryGetValue(arg, out bound)) return Bind(bound);
+                    if (Types.TryGetValue(arg, out Type bound)) return Bind(bound);
                     else
                     {
                         Type[] constraints = arg.GetGenericParameterConstraints();
@@ -863,7 +843,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Reflection
 
         public override string ToString()
         {
-            return $"Binding({StringUtil.DictionaryToString(Types, Environment.NewLine)}, Conversions={StringUtil.ArrayToString(Conversions)}, Depth={Depth})";
+            return $"Binding({StringUtil.DictionaryToString<Type,Type>(Types, Environment.NewLine)}, Conversions={StringUtil.ArrayToString(Conversions)}, Depth={Depth})";
         }
 
         /// <summary>
@@ -944,19 +924,21 @@ namespace Microsoft.ML.Probabilistic.Compiler.Reflection
 
         public bool AllowImplicitConversions;
         public bool AllowExplicitConversions;
-        public Func<Type, Type, bool> IsImplicitConversion;
+        public Func<Type, Type, int, bool> IsImplicitConversion;
 
-        public bool TryGetConversion(Type fromType, Type toType, out Conversion conv)
+        public bool TryGetConversion(Type fromType, Type toType, int position, out Conversion conv)
         {
-            if (IsImplicitConversion != null && IsImplicitConversion(fromType, toType))
+            if (IsImplicitConversion != null && IsImplicitConversion(fromType, toType, position))
             {
-                conv = new Conversion();
-                conv.SubclassCount = 1000;
+                conv = new Conversion
+                {
+                    SubclassCount = Conversion.SpecialImplicitSubclassCount
+                };
                 return true;
             }
             return Conversion.TryGetConversion(fromType, toType, out conv) &&
                    (conv.Converter == null ||
-                    (AllowExplicitConversions) ||
+                    AllowExplicitConversions ||
                     (AllowImplicitConversions && !conv.IsExplicit));
         }
     }
@@ -986,15 +968,17 @@ namespace Microsoft.ML.Probabilistic.Compiler.Reflection
 
             public static Constraints FromTypeParameter(Type typeParam)
             {
-                Dictionary<Type, Type> typeMap = new Dictionary<Type, Type>();
-                typeMap[typeParam] = ThisType;
+                Dictionary<Type, Type> typeMap = new Dictionary<Type, Type>
+                {
+                    [typeParam] = ThisType
+                };
                 return FromTypeParameter(typeParam, typeMap);
             }
 
-            public static Constraints FromTypeParameter(Type typeParam, IDictionary<Type, Type> typeMap)
+            public static Constraints FromTypeParameter(Type typeParam, IReadOnlyDictionary<Type, Type> typeMap)
             {
                 Type[] constraints = typeParam.GetGenericParameterConstraints();
-                constraints = Array.ConvertAll<Type, Type>(constraints, delegate (Type tt) { return Binding.ReplaceTypeParameters(tt, typeMap); });
+                constraints = Array.ConvertAll(constraints, delegate (Type tt) { return Binding.ReplaceTypeParameters(tt, typeMap); });
                 Constraints result = new Constraints();
                 result.attributes = typeParam.GenericParameterAttributes;
                 foreach (Type c in constraints)
@@ -1005,15 +989,12 @@ namespace Microsoft.ML.Probabilistic.Compiler.Reflection
                 return result;
             }
 
-#if SUPPRESS_UNREACHABLE_CODE_WARNINGS
-#pragma warning disable 162
-#endif
-
             public Constraints Intersect(Constraints that)
             {
                 Constraints result = new Constraints();
                 result.attributes = attributes | that.attributes;
-                if (false)
+                bool intersectConstraints = false;
+                if (intersectConstraints)
                 {
                     if (baseTypeConstraint == null) result.baseTypeConstraint = that.baseTypeConstraint;
                     else if (that.baseTypeConstraint == null) result.baseTypeConstraint = baseTypeConstraint;
@@ -1047,10 +1028,6 @@ namespace Microsoft.ML.Probabilistic.Compiler.Reflection
                 return result;
             }
 
-#if SUPPRESS_UNREACHABLE_CODE_WARNINGS
-#pragma warning restore 162
-#endif
-
             public static T[] ArrayJoin<T>(T[] array1, T[] array2)
             {
                 T[] result = new T[array1.Length + array2.Length];
@@ -1083,11 +1060,10 @@ namespace Microsoft.ML.Probabilistic.Compiler.Reflection
 
             public override bool Equals(object obj)
             {
-                Constraints that = obj as Constraints;
-                if (that == null) return false;
-                if (attributes != that.attributes) return false;
-                if (baseTypeConstraint != that.baseTypeConstraint) return false;
-                return (interfaceConstraints == that.interfaceConstraints);
+                return (obj is Constraints that) && 
+                    (attributes == that.attributes) &&
+                    (baseTypeConstraint == that.baseTypeConstraint) &&
+                    (interfaceConstraints == that.interfaceConstraints);
             }
 
             public override int GetHashCode()
@@ -1182,9 +1158,8 @@ namespace Microsoft.ML.Probabilistic.Compiler.Reflection
         {
             lock (GenericParameterCache)
             {
-                Type result;
                 KeyValuePair<string, Constraints> key = new KeyValuePair<string, Constraints>(name, constraints);
-                if (GenericParameterCache.TryGetValue(key, out result)) return result;
+                if (GenericParameterCache.TryGetValue(key, out Type result)) return result;
                 AssemblyName myAsmName = new AssemblyName("GenericParameterFactory");
                 AssemblyBuilder myAssembly = AssemblyBuilder.DefineDynamicAssembly(myAsmName, AssemblyBuilderAccess.Run);
                 ModuleBuilder myModule = myAssembly.DefineDynamicModule(myAsmName.Name);
@@ -1259,8 +1234,4 @@ namespace Microsoft.ML.Probabilistic.Compiler.Reflection
             return typeParam.IsGenericParameter && (typeParam.DeclaringType.Name == "MakeGenericParameter");
         }
     }
-
-#if SUPPRESS_XMLDOC_WARNINGS
-#pragma warning restore 1591
-#endif
 }

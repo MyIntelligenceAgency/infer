@@ -14,10 +14,15 @@ namespace Microsoft.ML.Probabilistic.Tests
     using Microsoft.ML.Probabilistic.Models;
 
     /// <summary>
-    /// Tests for <see cref="ConcatOp"/>.
+    /// Tests for <see cref="StringConcatOp"/>.
     /// </summary>
-    public class ConcatOpTests
+    public class StringConcatOpTests
     {
+        /// <summary>
+        /// The tolerance used when comparing probabilities.
+        /// </summary>
+        private const double ValueEps = 1e-14;
+
         /// <summary>
         /// Tests message operators for the string concatenation factor directly.
         /// </summary>
@@ -207,7 +212,7 @@ namespace Microsoft.ML.Probabilistic.Tests
             var engine = new InferenceEngine();
             var selectorPosterior = engine.Infer<Bernoulli>(selector);
 
-            Assert.Equal(0.6, selectorPosterior.GetProbTrue());
+            Assert.Equal(0.6, selectorPosterior.GetProbTrue(), ValueEps);
         }
 
         /// <summary>

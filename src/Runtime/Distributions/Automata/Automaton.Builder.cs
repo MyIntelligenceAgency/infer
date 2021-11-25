@@ -18,9 +18,22 @@ namespace Microsoft.ML.Probabilistic.Distributions.Automata
         public class Builder
         {
             /// <summary>
+            /// Containers which are reused between builders
+            /// </summary>
+            /// <remarks>
+            /// StringDistribution operations create enormous amounts of automata objects.
+            /// Reusing containers allows to avoid a lot of intermediate allocations.
+            ///
+            /// See also <see cref="PreallocatedAutomataObjects"/> class and comments on it.
+            /// This field can't go into that class because it depends on generic parameters.
+            /// </remarks>
+            [ThreadStatic]
+            private static (List<LinkedStateData>, List<LinkedTransitionNode>) preallocatedContainers;
+
+            /// <summary>
             /// States created so far.
             /// </summary>
-            private readonly List<LinkedStateData> states;
+            private List<LinkedStateData> states;
 
             /// <summary>
             /// Transitions created so far.
@@ -31,7 +44,7 @@ namespace Microsoft.ML.Probabilistic.Distributions.Automata
             /// list. It is done this way, because transitions can be added at any moment and inserting
             /// transition into a middle of array is not feasible.
             /// </remarks>
-            private readonly List<LinkedTransitionNode> transitions;
+            private List<LinkedTransitionNode> transitions;
 
             /// <summary>
             /// Number of transitions marked as removed. We maintain this count to calculate finaly transitions
@@ -51,8 +64,17 @@ namespace Microsoft.ML.Probabilistic.Distributions.Automata
             /// </summary>
             public Builder(int startStateCount = 1)
             {
-                this.states = new List<LinkedStateData>();
-                this.transitions = new List<LinkedTransitionNode>();
+                var preallocated = preallocatedContainers;
+
+                this.states = preallocated.Item1 ?? new List<LinkedStateData>();
+                this.transitions = preallocated.Item2 ?? new List<LinkedTransitionNode>();
+
+
+                // Generally only one builder is used at once.
+                // In case two builders are created, ensure that another builder won't use
+                // the same containers.
+                preallocatedContainers = default;
+
                 this.maxStateCount = MaxStateCount;
                 this.AddStates(startStateCount);
             }
@@ -143,7 +165,7 @@ namespace Microsoft.ML.Probabilistic.Distributions.Automata
             {
                 for (var i = 0; i < count; ++i)
                 {
-                    AddState();
+                    this.AddState();
                 }
             }
 
@@ -159,8 +181,7 @@ namespace Microsoft.ML.Probabilistic.Distributions.Automata
                     stateBuilder.SetEndWeight(state.EndWeight);
                     foreach (var transition in state.Transitions)
                     {
-                        var updatedTransition = transition;
-                        updatedTransition.DestinationStateIndex += oldStateCount;
+                        var updatedTransition = transition.With(destinationStateIndex: transition.DestinationStateIndex + oldStateCount);
                         stateBuilder.AddTransition(updatedTransition);
                     }
                 }
@@ -173,7 +194,7 @@ namespace Microsoft.ML.Probabilistic.Distributions.Automata
             {
                 // Caller must ensure that it doesn't try to delete start state. Because it will lead to
                 // invalid automaton.
-                Debug.Assert(stateIndex != StartStateIndex);
+                Debug.Assert(stateIndex != this.StartStateIndex);
 
                 // After state is removed, all its transitions will be dead
                 for (var iterator = this[stateIndex].TransitionIterator; iterator.Ok; iterator.Next())
@@ -190,7 +211,7 @@ namespace Microsoft.ML.Probabilistic.Distributions.Automata
                         var transition = iterator.Value;
                         if (transition.DestinationStateIndex > stateIndex)
                         {
-                            transition.DestinationStateIndex -= 1;
+                            transition = transition.With(destinationStateIndex: transition.DestinationStateIndex - 1);
                             iterator.Value = transition;
                         }
                         else if (transition.DestinationStateIndex == stateIndex)
@@ -209,7 +230,8 @@ namespace Microsoft.ML.Probabilistic.Distributions.Automata
             /// <param name="removeLabel">Label which marks states which should be deleted</param>
             public int RemoveStates(bool[] labels, bool removeLabel)
             {
-                var oldToNewStateIdMapping = new int[this.states.Count];
+                var oldToNewStateIdMapping = PreallocatedAutomataObjects.LeaseRemoveStatesState(this.states.Count);
+
                 var newStateId = 0;
                 var deadStateCount = 0;
                 for (var stateId = 0; stateId < this.states.Count; ++stateId)
@@ -234,7 +256,7 @@ namespace Microsoft.ML.Probabilistic.Distributions.Automata
 
                 // Caller must ensure that it doesn't try to delete start state. Because it will lead to
                 // invalid automaton.
-                Debug.Assert(StartStateIndex != -1);
+                Debug.Assert(this.StartStateIndex != -1);
 
                 for (var i = 0; i < this.states.Count; ++i)
                 {
@@ -258,14 +280,14 @@ namespace Microsoft.ML.Probabilistic.Distributions.Automata
                     for (var iterator = this[newId].TransitionIterator; iterator.Ok; iterator.Next())
                     {
                         var transition = iterator.Value;
-                        transition.DestinationStateIndex = oldToNewStateIdMapping[transition.DestinationStateIndex];
-                        if (transition.DestinationStateIndex == -1)
+                        var destinationStateIndex = oldToNewStateIdMapping[transition.DestinationStateIndex];
+                        if (destinationStateIndex == -1)
                         {
                             iterator.Remove();
                         }
                         else
                         {
-                            iterator.Value = transition;
+                            iterator.Value = transition.With(destinationStateIndex: destinationStateIndex);
                         }
                     }
                 }
@@ -275,13 +297,28 @@ namespace Microsoft.ML.Probabilistic.Distributions.Automata
                 return deadStateCount;
             }
 
-           
+
             /// <summary>
             /// Creates an automaton <c>f'(s) = sum_{tu=s} f(t)g(u)</c>, where <c>f(t)</c> is the current
             /// automaton (in builder) and <c>g(u)</c> is the given automaton.
             /// The resulting automaton is also known as the Cauchy product of two automata.
             /// </summary>
-            public void Append(
+            /// <param name="automaton">Given automaton.</param>
+            /// <param name="group">If non-zero, all transitions in the appended part will be put
+            /// into the specified group.</param>
+            /// <param name="avoidEpsilonTransitions">When set to <see langword="true"/> (default), and
+            /// at least one of the following
+            /// <list type="bullet">
+            /// <item>None of the end states of the current automaton have any outgoing transitions</item>
+            /// <item>The start state of the given <paramref name="automaton"/> has no incoming transitions</item>
+            /// </list>
+            /// is true, no epsilon transitions will be used to concatenate the automata. Otherwise,
+            /// epsilon transitions will be used</param>
+            /// <returns>A pair of boolean values. The first indicates whether adding new epsilon transitions was avoided.
+            /// The second indicates, whether the determinization state of the concatenated automata was preserved, i.e.
+            /// whether both the current and the given automata being determinized implies that the result automaton is
+            /// determinized as well.</returns>
+            public (bool avoidedEpsilonTransitions, bool preservedDeterminizationState) Append(
                 Automaton<TSequence, TElement, TElementDistribution, TSequenceManipulator, TThis> automaton,
                 int group = 0,
                 bool avoidEpsilonTransitions = true)
@@ -294,11 +331,10 @@ namespace Microsoft.ML.Probabilistic.Distributions.Automata
                     stateBuilder.SetEndWeight(state.EndWeight);
                     foreach (var transition in state.Transitions)
                     {
-                        var updatedTransition = transition;
-                        updatedTransition.DestinationStateIndex += oldStateCount;
+                        var updatedTransition = transition.With(destinationStateIndex: transition.DestinationStateIndex + oldStateCount);
                         if (group != 0)
                         {
-                            updatedTransition.Group = group;
+                            updatedTransition = updatedTransition.With(group: group);
                         }
 
                         stateBuilder.AddTransition(updatedTransition);
@@ -307,7 +343,13 @@ namespace Microsoft.ML.Probabilistic.Distributions.Automata
 
                 var secondStartState = this[oldStateCount + automaton.Start.Index];
 
-                if (avoidEpsilonTransitions && CanMergeEndAndStart())
+
+                bool allOldEndStatesHaveNoOutgoingTransitions = AllOldEndStatesHaveNoOutgoingTransitions();
+                bool secondStartStateHasIncomingTransitions = SecondStartStateHasIncomingTransitions();
+                bool canMergeEndAndStart = allOldEndStatesHaveNoOutgoingTransitions || !secondStartStateHasIncomingTransitions;
+                bool willAvoidEpsilonTransitions = avoidEpsilonTransitions && canMergeEndAndStart;
+                bool preservedDeterminization = avoidEpsilonTransitions && allOldEndStatesHaveNoOutgoingTransitions && !secondStartStateHasIncomingTransitions;
+                if (willAvoidEpsilonTransitions)
                 {
                     // Remove start state of appended automaton and copy all its transitions to previous end states
                     for (var i = 0; i < oldStateCount; ++i)
@@ -322,19 +364,10 @@ namespace Microsoft.ML.Probabilistic.Distributions.Automata
                         {
                             var transition = iterator.Value;
 
-                            if (group != 0)
-                            {
-                                transition.Group = group;
-                            }
-
-                            if (transition.DestinationStateIndex == secondStartState.Index)
-                            {
-                                transition.DestinationStateIndex = endState.Index;
-                            }
-                            else
-                            {
-                                transition.Weight *= endState.EndWeight;
-                            }
+                            transition = transition.With(
+                                weight: transition.DestinationStateIndex == secondStartState.Index ? (Weight?)null : transition.Weight * endState.EndWeight,
+                                destinationStateIndex: transition.DestinationStateIndex == secondStartState.Index ? (int?)endState.Index : null,
+                                group: group != 0 ? (int?)group : null);
 
                             endState.AddTransition(transition);
                         }
@@ -358,8 +391,7 @@ namespace Microsoft.ML.Probabilistic.Distributions.Automata
                     }
                 }
 
-                bool CanMergeEndAndStart() =>
-                    AllOldEndStatesHaveNoOutgoingTransitions() || !SecondStartStateHasIncomingTransitions();
+                return (willAvoidEpsilonTransitions, preservedDeterminization);
 
                 bool AllOldEndStatesHaveNoOutgoingTransitions()
                 {
@@ -394,13 +426,16 @@ namespace Microsoft.ML.Probabilistic.Distributions.Automata
             #region Result getters
 
             /// <summary>
-            /// Builds new automaton object.
+            /// Builds new automaton object. Builder must not be used after this method is called
             /// </summary>
             public TThis GetAutomaton() => new TThis() { Data = this.GetData() };
 
             /// <summary>
             /// Stores built automaton in pre-allocated <see cref="Automaton{TSequence,TElement,TElementDistribution,TSequenceManipulator,TThis}"/> object.
             /// </summary>
+            /// <remarks>
+            /// Builder must not be used after this method is called.
+            /// </remarks>
             public DataContainer GetData(bool? isDeterminized = null)
             {
                 if (this.StartStateIndex < 0 || this.StartStateIndex >= this.states.Count)
@@ -408,6 +443,11 @@ namespace Microsoft.ML.Probabilistic.Distributions.Automata
                     throw new InvalidOperationException(
                         $"Built automaton must have a valid start state. " +
                         $"StartStateIndex = {this.StartStateIndex}, states.Count = {this.states.Count}");
+                }
+
+                if (this.states == null)
+                {
+                    throw new InvalidOperationException("GetData() can be called only once");
                 }
 
                 var hasEpsilonTransitions = false;
@@ -454,6 +494,14 @@ namespace Microsoft.ML.Probabilistic.Distributions.Automata
 
                 // Detect two very common automata shapes
                 var isEnumerable = hasOnlyForwardTransitions ? true : (bool?)null;
+
+                // Return lists into the preallocated cache. This will make this object unusable
+                // from now on.
+                this.states.Clear();
+                this.transitions.Clear();
+                preallocatedContainers = (this.states, this.transitions);
+                this.states = null;
+                this.transitions = null;
 
                 return new DataContainer(
                     this.StartStateIndex,
@@ -626,7 +674,7 @@ namespace Microsoft.ML.Probabilistic.Distributions.Automata
                     int group = 0)
                 {
                     return this.AddTransition(
-                        new TElementDistribution {Point = element}, weight, destinationStateIndex, group);
+                        ElementDistributionFactory.CreatePointMass(element), weight, destinationStateIndex, group);
                 }
 
                 /// <summary>
@@ -779,17 +827,17 @@ namespace Microsoft.ML.Probabilistic.Distributions.Automata
                     // unlink from previous node
                     if (node.Prev != -1)
                     {
-                        var prevNode = builder.transitions[node.Prev];
+                        var prevNode = this.builder.transitions[node.Prev];
                         prevNode.Next = node.Next;
-                        builder.transitions[node.Prev] = prevNode;
+                        this.builder.transitions[node.Prev] = prevNode;
                     }
 
                     // unlink from next node
                     if (node.Next != -1)
                     {
-                        var nextNode = builder.transitions[node.Next];
+                        var nextNode = this.builder.transitions[node.Next];
                         nextNode.Prev = node.Prev;
-                        builder.transitions[node.Next] = nextNode;
+                        this.builder.transitions[node.Next] = nextNode;
                     }
 
                     // update references in state

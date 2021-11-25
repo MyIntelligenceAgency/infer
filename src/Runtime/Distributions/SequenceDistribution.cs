@@ -2,8 +2,6 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using System.Runtime.InteropServices.ComTypes;
-
 namespace Microsoft.ML.Probabilistic.Distributions
 {
     using System;
@@ -26,12 +24,14 @@ namespace Microsoft.ML.Probabilistic.Distributions
     /// <typeparam name="TElement">The type of a sequence element.</typeparam>
     /// <typeparam name="TElementDistribution">The type of a distribution over sequence elements.</typeparam>
     /// <typeparam name="TSequenceManipulator">The type providing ways to manipulate sequences.</typeparam>
-    /// <typeparam name="TWeightFunction">The type of an underlying function mapping sequences to weights. Currently must be a weighted finite state automaton.</typeparam>
+    /// <typeparam name="TAutomaton">The type of a weighted finite state automaton that can be used to represent every valid function mapping sequences to weights.</typeparam>
+    /// <typeparam name="TWeightFunction">The type of an underlying function mapping sequences to weights.</typeparam>
+    /// <typeparam name="TWeightFunctionFactory">The type of the factory for <typeparamref name="TWeightFunction"/>.</typeparam>
     /// <typeparam name="TThis">The type of a concrete distribution class.</typeparam>
     [Serializable]
     [DataContract]
     [Quality(QualityBand.Experimental)]
-    public abstract class SequenceDistribution<TSequence, TElement, TElementDistribution, TSequenceManipulator, TWeightFunction, TThis> :
+    public abstract class SequenceDistribution<TSequence, TElement, TElementDistribution, TSequenceManipulator, TAutomaton, TWeightFunction, TWeightFunctionFactory, TThis> :
         IDistribution<TSequence>,
         SettableTo<TThis>,
         SettableToProduct<TThis>,
@@ -46,9 +46,11 @@ namespace Microsoft.ML.Probabilistic.Distributions
         Sampleable<TSequence>
         where TSequence : class, IEnumerable<TElement>
         where TSequenceManipulator : ISequenceManipulator<TSequence, TElement>, new()
-        where TElementDistribution : IDistribution<TElement>, SettableToProduct<TElementDistribution>, SettableToWeightedSumExact<TElementDistribution>, CanGetLogAverageOf<TElementDistribution>, SettableToPartialUniform<TElementDistribution>, Sampleable<TElement>, new()
-        where TWeightFunction : Automaton<TSequence, TElement, TElementDistribution, TSequenceManipulator, TWeightFunction>, new()
-        where TThis : SequenceDistribution<TSequence, TElement, TElementDistribution, TSequenceManipulator, TWeightFunction, TThis>, new()
+        where TElementDistribution : IImmutableDistribution<TElement, TElementDistribution>, CanGetLogAverageOf<TElementDistribution>, CanComputeProduct<TElementDistribution>, CanCreatePartialUniform<TElementDistribution>, SummableExactly<TElementDistribution>, Sampleable<TElement>, new()
+        where TAutomaton : Automaton<TSequence, TElement, TElementDistribution, TSequenceManipulator, TAutomaton>, new()
+        where TWeightFunction : WeightFunctions<TSequence, TElement, TElementDistribution, TSequenceManipulator, TAutomaton>.IWeightFunction<TWeightFunction>, new()
+        where TWeightFunctionFactory : WeightFunctions<TSequence, TElement, TElementDistribution, TSequenceManipulator, TAutomaton>.IWeightFunctionFactory<TWeightFunction>, new()
+        where TThis : SequenceDistribution<TSequence, TElement, TElementDistribution, TSequenceManipulator, TAutomaton, TWeightFunction, TWeightFunctionFactory, TThis>, new()
     {
         #region Fields & constants
 
@@ -57,11 +59,13 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// </summary>
         private static readonly TSequenceManipulator SequenceManipulator = new TSequenceManipulator();
 
+        private static readonly TWeightFunctionFactory WeightFunctionFactory = new TWeightFunctionFactory();
+
         /// <summary>
         /// A function mapping sequences to weights (non-normalized probabilities).
         /// </summary>
         [DataMember]
-        private TWeightFunction sequenceToWeight;
+        private TWeightFunction sequenceToWeight = new TWeightFunction();
 
         /// <summary>
         /// Specifies whether the <see cref="sequenceToWeight"/> is normalized.
@@ -69,20 +73,14 @@ namespace Microsoft.ML.Probabilistic.Distributions
         [DataMember]
         private bool isNormalized;
 
-        /// <summary>
-        /// If the distribution is a point mass, stores the point. Otherwise it is set to <see langword="null"/>.
-        /// </summary>
-        [DataMember]
-        private TSequence point;
-
         #endregion
 
         #region Constructor
 
         /// <summary>
         /// Initializes a new instance of the
-        /// <see cref="SequenceDistribution{TSequence,TElement,TElementDistribution,TSequenceManipulator,TWeightFunction,TThis}"/> class
-        /// with a null weight function.  The workspace must be set by the subclass constructor or factory method.
+        /// <see cref="SequenceDistribution{TSequence,TElement,TElementDistribution,TSequenceManipulator,TAutomaton,TWeightFunction,TWeightFunctionFactory,TThis}"/> class
+        /// with a null weight function.  The weight function must be set by the subclass constructor or factory method.
         /// </summary>
         protected SequenceDistribution()
         {
@@ -92,27 +90,21 @@ namespace Microsoft.ML.Probabilistic.Distributions
 
         #region Properties
 
+        private static TElementDistribution ElementDistributionFactory =>
+                Automaton<TSequence, TElement, TElementDistribution, TSequenceManipulator, TAutomaton>.ElementDistributionFactory;
+
         /// <summary>
         /// Gets or sets the point mass represented by the distribution.
         /// </summary>
         public TSequence Point
         {
-            get
-            {
-                if (this.point == null)
-                {
-                    throw new InvalidOperationException("This distribution is not a point mass.");
-                }
-
-                return this.point;
-            }
+            get => sequenceToWeight.Point;
 
             set
             {
                 Argument.CheckIfNotNull(value, "value", "Point mass must not be null.");
                 
-                this.sequenceToWeight = null;
-                this.point = value;
+                sequenceToWeight = WeightFunctionFactory.PointMass(value);
                 this.isNormalized = true;
             }
         }
@@ -120,10 +112,12 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// <summary>
         /// Gets a value indicating whether the current distribution represents a point mass.
         /// </summary>
-        public bool IsPointMass
-        {
-            get { return this.point != null; }
-        }
+        public bool IsPointMass => sequenceToWeight.IsPointMass;
+
+        /// <summary>
+        /// Gets a value indicating whether the current distribution is represented as an automaton internally.
+        /// </summary>
+        public bool UsesAutomatonRepresentation => sequenceToWeight.UsesAutomatonRepresentation;
 
         /// <summary>
         /// Gets a value indicating whether the current distribution
@@ -179,31 +173,22 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// <summary>
         /// Creates a distribution from a given weight (non-normalized probability) function.
         /// </summary>
-        /// <param name="sequenceToWeight">The weight function specifying the distribution.</param>
+        /// <param name="weightFunction">The weight function specifying the distribution.</param>
         /// <returns>The created distribution.</returns>
-        [Construction("GetWorkspaceOrPoint")]
-        public static TThis FromWeightFunction(TWeightFunction sequenceToWeight)
+        [Construction(nameof(GetWeightFunction))]
+        public static TThis FromWeightFunction(TWeightFunction weightFunction)
         {
-            Argument.CheckIfNotNull(sequenceToWeight, "sequenceToWeight");
-
-            return FromWorkspace(sequenceToWeight.Clone());
-        }
-
-        /// <summary>
-        /// Creates a distribution which will use a given weight function as a workspace.
-        /// Any modifications to the workspace after the distribution has been created
-        /// would put the distribution into an invalid state.
-        /// </summary>
-        /// <param name="workspace">The workspace to create the distribution from.</param>
-        /// <returns>The created distribution.</returns>
-        public static TThis FromWorkspace(TWeightFunction workspace)
-        {
-            Argument.CheckIfNotNull(workspace, "workspace");
+            Argument.CheckIfNotNull(weightFunction, nameof(weightFunction));
 
             var result = new TThis();
-            result.SetWorkspace(workspace);
+            result.SetWeightFunction(weightFunction);
             return result;
         }
+
+        /// <inheritdoc cref="FromWeightFunction(TWeightFunction)"/>
+        [Construction(nameof(ToAutomaton), UseWhen = nameof(UsesAutomatonRepresentation))]
+        public static TThis FromWeightFunction(TAutomaton weightFunction)
+            => FromWeightFunction(WeightFunctionFactory.FromAutomaton(weightFunction));
 
         /// <summary>
         /// Creates a distribution which puts all probability mass on the empty sequence.
@@ -226,10 +211,10 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// </remarks>
         public static TThis SingleElement(TElementDistribution elementDistribution)
         {
-            var func = new Automaton<TSequence, TElement, TElementDistribution, TSequenceManipulator, TWeightFunction>.Builder();
+            var func = new Automaton<TSequence, TElement, TElementDistribution, TSequenceManipulator, TAutomaton>.Builder();
             var end = func.Start.AddTransition(elementDistribution, Weight.One);
             end.SetEndWeight(Weight.One);
-            return FromWorkspace(func.GetAutomaton());
+            return FromWeightFunction(func.GetAutomaton());
         }
 
         /// <summary>
@@ -253,7 +238,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// <returns>The created distribution.</returns>
         public static TThis Concatenate(IEnumerable<TElementDistribution> elementDistributions, bool allowEarlyEnd = false, bool repeatLastElement = false)
         {
-            var result = new Automaton<TSequence, TElement, TElementDistribution, TSequenceManipulator, TWeightFunction>.Builder();
+            var result = new Automaton<TSequence, TElement, TElementDistribution, TSequenceManipulator, TAutomaton>.Builder();
             var last = result.Start;
             var elementDistributionArray = elementDistributions.ToArray();
             for (var i = 0; i < elementDistributionArray.Length - 1; i++)
@@ -276,7 +261,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
             }
 
             last.SetEndWeight(Weight.One);
-            return FromWorkspace(result.GetAutomaton());
+            return FromWeightFunction(result.GetAutomaton());
         }
 
         /// <summary>
@@ -290,7 +275,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
         {
             Argument.CheckIfNotNull(distributions, "distributions");
 
-            var enumerable = distributions as IList<TThis> ?? distributions.ToList();
+            var enumerable = distributions as IReadOnlyList<TThis> ?? distributions.ToList();
             if (enumerable.Count == 1)
             {
                 if (!cloneIfSizeOne)
@@ -301,9 +286,16 @@ namespace Microsoft.ML.Probabilistic.Distributions
                 return enumerable[0].Clone();
             }
 
-            var probFunctions = enumerable.Select(d => skipNormalization ? d.GetWorkspaceOrPoint() : d.GetNormalizedWorkspaceOrPoint());
+            if (!skipNormalization)
+            {
+                foreach (var d in enumerable)
+                    d.EnsureNormalized();
+            }
 
-            return FromWorkspace(Automaton<TSequence, TElement, TElementDistribution, TSequenceManipulator, TWeightFunction>.Sum(probFunctions));
+            var probFunctions = enumerable.Select(d => d.sequenceToWeight);
+            var result = new TThis();
+            result.sequenceToWeight = WeightFunctionFactory.Sum(probFunctions).NormalizeStructure();
+            return result;
         }
 
         /// <summary>
@@ -339,7 +331,9 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// <returns>The created distribution.</returns>
         public static TThis OneOf(IEnumerable<KeyValuePair<TSequence, double>> sequenceProbPairs)
         {
-            return FromWorkspace(Automaton<TSequence, TElement, TElementDistribution, TSequenceManipulator, TWeightFunction>.FromValues(sequenceProbPairs));
+            var result = new TThis();
+            result.sequenceToWeight = WeightFunctionFactory.FromValues(sequenceProbPairs).NormalizeStructure();
+            return result;
         }
 
         /// <summary>
@@ -349,10 +343,9 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// <returns>The created distribution.</returns>
         public static TThis OneOf(IEnumerable<TSequence> sequences)
         {
-            Argument.CheckIfNotNull(sequences, "sequences");
+            Argument.CheckIfNotNull(sequences, nameof(sequences));
 
-            var enumerable = sequences as IList<TSequence> ?? sequences.ToList();
-            return OneOf(enumerable.Select(PointMass), false, true);
+            return OneOf(sequences.Select(s => new KeyValuePair<TSequence, double>(s, 1.0)));
         }
 
         /// <summary>
@@ -378,7 +371,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// <returns>The created distribution.</returns>
         public static TThis Any(int minLength = 0, int? maxLength = null)
         {
-            return Repeat(Distribution.CreateUniform<TElementDistribution>(), minLength, maxLength);
+            return Repeat(ElementDistributionFactory.CreateUniform(), minLength, maxLength); ;
         }
 
         /// <summary>
@@ -397,7 +390,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// <returns>The created distribution.</returns>
         public static TThis Repeat(TElement element, int minTimes = 1, int? maxTimes = null, DistributionKind uniformity = DistributionKind.UniformOverValue)
         {
-            var elementDistribution = new TElementDistribution { Point = element };
+            var elementDistribution = ElementDistributionFactory.CreatePointMass(element);
             return Repeat(elementDistribution, minTimes, maxTimes, uniformity);
         }
 
@@ -456,13 +449,13 @@ namespace Microsoft.ML.Probabilistic.Distributions
                 }
             }
 
-            allowedElements = Distribution.CreatePartialUniform(allowedElements);
+            allowedElements = allowedElements.CreatePartialUniform();
             double distLogNormalizer = -allowedElements.GetLogAverageOf(allowedElements);
             var weight = uniformity == DistributionKind.UniformOverLengthThenValue
                 ? Weight.One
                 : Weight.FromLogValue(distLogNormalizer);
 
-            var func = new Automaton<TSequence, TElement, TElementDistribution, TSequenceManipulator, TWeightFunction>.Builder();
+            var func = new Automaton<TSequence, TElement, TElementDistribution, TSequenceManipulator, TAutomaton>.Builder();
             var state = func.Start;
 
             int iterationBound = maxTimes.HasValue ? maxTimes.Value : minTimes;
@@ -482,7 +475,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
                 state.AddSelfTransition(allowedElements, weight);
             }
 
-            return FromWorkspace(func.GetAutomaton());
+            return FromWeightFunction(func.GetAutomaton());
         }
 
         /// <summary>
@@ -507,24 +500,13 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// <returns>The created distribution.</returns>
         public static TThis Repeat(TThis dist, int minTimes = 1, int? maxTimes = null)
         {
-            Argument.CheckIfNotNull(dist, "dist");
-            Argument.CheckIfInRange(minTimes >= 0, "minTimes", "The minimum number of repetitions must be non-negative.");
+            Argument.CheckIfNotNull(dist, nameof(dist));
+            Argument.CheckIfInRange(minTimes >= 0, nameof(minTimes), "The minimum number of repetitions must be non-negative.");
             Argument.CheckIfValid(!maxTimes.HasValue || maxTimes.Value >= minTimes, "The maximum number of repetitions must not be less than the minimum number.");
 
-            if (dist.IsPointMass && maxTimes.HasValue && minTimes == maxTimes)
-            {
-                var newSequenceElements = new List<TElement>(SequenceManipulator.GetLength(dist.Point) * minTimes);
-                for (int i = 0; i < minTimes; ++i)
-                {
-                    newSequenceElements.AddRange(dist.Point);
-                }
-
-                return PointMass(SequenceManipulator.ToSequence(newSequenceElements));
-            }
-
             double logNormalizer = -dist.GetLogAverageOf(dist);
-            return FromWorkspace(Automaton<TSequence, TElement, TElementDistribution, TSequenceManipulator, TWeightFunction>.Repeat(
-                dist.GetNormalizedWorkspaceOrPoint().ScaleLog(logNormalizer), minTimes, maxTimes));
+
+            return FromWeightFunction(dist.sequenceToWeight.ScaleLog(logNormalizer).Repeat(minTimes, maxTimes));
         }
 
         /// <summary>
@@ -864,54 +846,25 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// </remarks>
         public void AppendInPlace(TThis dist, int group = 0)
         {
-            Argument.CheckIfNotNull(dist, "dist");
+            Argument.CheckIfNotNull(dist, nameof(dist));
 
-            if (this.IsPointMass && dist.IsPointMass && group == 0)
-            {
-                this.Point = SequenceManipulator.Concat(this.point, dist.point);
-                return;
-            }
-
-            var workspace = this.GetWorkspaceOrPoint();
-            if (dist.IsPointMass)
-            {
-                workspace.AppendInPlace(dist.Point, group);
-            }
-            else
-            {
-                workspace.AppendInPlace(dist.sequenceToWeight, group);
-            }
-
-            this.SetWorkspace(workspace);
+            SetWeightFunction(sequenceToWeight.Append(dist.sequenceToWeight, group));
         }
 
-        /// <summary>
-        /// Replaces the current distribution by a distribution induced by a given weight function.
-        /// </summary>
-        /// <param name="newSequenceToWeight">The function mapping sequences to weights.</param>
-        public void SetWeightFunction(TWeightFunction newSequenceToWeight)
-        {
-            Argument.CheckIfNotNull(newSequenceToWeight, "newSequenceToWeight");
-
-            this.SetWorkspace(newSequenceToWeight.Clone());
-        }
+        /// <inheritdoc cref="SetWeightFunction(TWeightFunction,bool)"/>
+        public void SetWeightFunction(TAutomaton weightFunction, bool normalizeStructure = true)
+            => SetWeightFunction(WeightFunctionFactory.FromAutomaton(weightFunction), normalizeStructure);
 
         /// <summary>
-        /// Replaces the workspace (weight function) of the current distribution with a given one.
+        /// Replaces the weight function of the current distribution with a given one.
         /// </summary>
-        /// <param name="workspace">The workspace to replace the current one with.</param>
+        /// <param name="weightFunction">The weight function to replace the current one with.</param>
         /// <param name="normalizeStructure">Whether to normalize the structure of the distribution</param>
-        /// <remarks>
-        /// If the given workspace represents a point mass, the distribution would be converted to a point mass
-        /// and the workspace would be set to <see langword="null"/>.
-        /// Any modifications of the workspace will put the distribution into an undefined state.
-        /// </remarks>
-        public void SetWorkspace(TWeightFunction workspace, bool normalizeStructure=true)
+        public void SetWeightFunction(TWeightFunction weightFunction, bool normalizeStructure = true)
         {
-            Argument.CheckIfNotNull(workspace, "workspace");
+            Argument.CheckIfNotNull(weightFunction, nameof(weightFunction));
 
-            this.point = null;
-            this.sequenceToWeight = workspace;
+            this.sequenceToWeight = weightFunction;
             this.isNormalized = false;
 
             if (normalizeStructure)
@@ -921,37 +874,57 @@ namespace Microsoft.ML.Probabilistic.Distributions
         }
 
         /// <summary>
-        /// Returns the underlying weight function, or, if the distribution is a point mass,
-        /// a functional representation of the corresponding point.
-        /// Any modifications of the returned function will put the distribution into an undefined state.
+        /// Returns an automaton representing the underlying weight function.
         /// </summary>
         /// <remarks>
         /// The returned weight function might differ from the probability function by an arbitrary scale factor.
-        /// To ensure that the workspace is normalized, use <see cref="GetNormalizedWorkspaceOrPoint"/>.
+        /// To ensure that the weight function is normalized, use <see cref="ToNormalizedAutomaton"/>.
         /// </remarks>
-        /// <returns>The underlying weight function or a functional representation of the point.</returns>
-        public TWeightFunction GetWorkspaceOrPoint()
+        /// <returns>An automaton representing the underlying weight function.</returns>
+        public TAutomaton ToAutomaton()
         {
-            return this.IsPointMass
-                ? Automaton<TSequence, TElement, TElementDistribution, TSequenceManipulator, TWeightFunction>.ConstantOn(1.0, this.point)
-                : this.sequenceToWeight;
+            return sequenceToWeight.AsAutomaton();
         }
 
         /// <summary>
-        /// Returns the underlying weight function, or, if the distribution is a point mass,
-        /// a functional representation of the corresponding point.
-        /// Any modifications of the returned function will put the distribution into an undefined state.
+        /// Returns an automaton representing the underlying weight function.
         /// </summary>
         /// <remarks>
         /// The returned weight function is guaranteed to be normalized.
         /// If you don't care about an arbitrary scale factor, 
-        /// consider using <see cref="GetWorkspaceOrPoint"/> which has less overhead.
+        /// consider using <see cref="ToAutomaton"/> which has less overhead.
         /// </remarks>
-        /// <returns>The underlying weight function or a functional representation of the point.</returns>
-        public TWeightFunction GetNormalizedWorkspaceOrPoint()
+        /// <returns>An automaton representing the underlying weight function.</returns>
+        public TAutomaton ToNormalizedAutomaton()
         {
             this.EnsureNormalized();
-            return this.GetWorkspaceOrPoint();
+            return this.ToAutomaton();
+        }
+
+        /// <summary>
+        /// Returns the underlying weight function.
+        /// </summary>
+        /// <remarks>
+        /// The returned weight function might differ from the probability function by an arbitrary scale factor.
+        /// To ensure that the weight function is normalized, use <see cref="GetNormalizedWeightFunction"/>.
+        /// </remarks>
+        /// <returns>The underlying weight function.</returns>
+        public TWeightFunction GetWeightFunction() => sequenceToWeight;
+
+
+        /// <summary>
+        /// Returns the underlying weight function.
+        /// </summary>
+        /// <remarks>
+        /// The returned weight function is guaranteed to be normalized.
+        /// If you don't care about an arbitrary scale factor, 
+        /// consider using <see cref="GetWeightFunction"/> which has less overhead.
+        /// </remarks>
+        /// <returns>The underlying weight function.</returns>
+        public TWeightFunction GetNormalizedWeightFunction()
+        {
+            EnsureNormalized();
+            return sequenceToWeight;
         }
 
         /// <summary>
@@ -959,18 +932,16 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// Only point mass elements are supported.
         /// </summary>
         /// <param name="maxCount">The maximum support enumeration count.</param>
-        /// <param name="tryDeterminize">Try to determinize if this is a string automaton</param>
+        /// <param name="tryDeterminize">Try to determinize if this distribution uses
+        /// a string automaton representation.</param>
         /// <exception cref="AutomatonException">Thrown if enumeration is too large.</exception>
         /// <returns>The strings supporting this distribution</returns>
         public IEnumerable<TSequence> EnumerateSupport(int maxCount = 1000000, bool tryDeterminize = true)
         {
-            if (this.IsPointMass)
-            {
-                return new List<TSequence>(new[] { this.Point });
-            }
+            if (tryDeterminize)
+                TryDeterminizeBeforeSupportEnumeration();
 
-            this.EnsureNormalized();
-            return this.sequenceToWeight.EnumerateSupport(maxCount, tryDeterminize);
+            return this.sequenceToWeight.EnumerateSupport(maxCount);
         }
 
         /// <summary>
@@ -979,19 +950,16 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// </summary>
         /// <param name="maxCount">The maximum support enumeration count.</param>
         /// <param name="result">The strings supporting this distribution.</param>
-        /// <param name="tryDeterminize">Try to determinize if this is a string automaton</param>
+        /// <param name="tryDeterminize">Try to determinize if this distribution uses
+        /// a string automaton representation.</param>
         /// <exception cref="AutomatonException">Thrown if enumeration is too large.</exception>
         /// <returns>True if successful, false otherwise.</returns>
         public bool TryEnumerateSupport(int maxCount, out IEnumerable<TSequence> result, bool tryDeterminize = true)
         {
-            if (this.IsPointMass)
-            {
-                result = new List<TSequence>(new[] { this.Point });
-                return true;
-            }
+            if (tryDeterminize)
+                TryDeterminizeBeforeSupportEnumeration();
 
-            this.EnsureNormalized();
-            return this.sequenceToWeight.TryEnumerateSupport(maxCount, out result, tryDeterminize);
+            return this.sequenceToWeight.TryEnumerateSupport(maxCount, out result);
         }
 
         /// <summary>
@@ -1008,18 +976,53 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// <returns>For each component, the list of element distributions and the log mixture weight for that component.</returns>
         public IEnumerable<Tuple<List<TElementDistribution>, double>> EnumerateComponents()
         {
-            if (this.IsPointMass)
-            {
-                var singleton = new List<Tuple<List<TElementDistribution>, double>>
-                {
-                   new Tuple<List<TElementDistribution>, double>(this.Point.Select(el => new TElementDistribution { Point = el }).ToList(),0)
-                };
-
-                return singleton;
-            }
-
             return this.sequenceToWeight.EnumeratePaths();
         }
+
+        /// <summary>
+        /// Tries to replace the internal representation of the current distribution with an equivalent
+        /// deterministic automaton, unless the current representation is guaranteed to produce
+        /// a deterministic automaton on conversion.
+        /// </summary>
+        /// <returns><see langword="true"/> if the internal representation of the current distribution
+        /// was successfully replaced with a deterministic automaton or is guaranteed to produce one
+        /// on direct conversion, <see langword="false"/> otherwise.</returns>
+        public bool TryDeterminize()
+        {
+            if (IsPointMass || (this is StringDistribution && !UsesAutomatonRepresentation))
+            {
+                return true;
+            }
+
+            var determinizationSuccess = ToNormalizedAutomaton().TryDeterminize(out var determinizationResult);
+            SetWeightFunction(determinizationResult, false);
+            return determinizationSuccess;
+        }
+
+        /// <summary>
+        /// Sets a value that, if not null, will be returned when computing the log probability of any sequence
+        /// which is in the support of this distribution.
+        /// </summary>
+        /// <param name="logValueOverride">A non-null value that should be returned when computing the log probability of any sequence
+        /// which is in the support of this distribution, or <see langword="null"/> to clear any existing override.</param>
+        public void SetLogValueOverride(double? logValueOverride)
+        {
+            // No need to clear logValueOverride fof non-automaton representations
+            if (logValueOverride.HasValue || UsesAutomatonRepresentation)
+            {
+                var workspace = ToAutomaton().WithLogValueOverride(logValueOverride);
+                // Normalizing structure can be useful only when logValueOverride == null
+                SetWeightFunction(workspace, !logValueOverride.HasValue);
+            }
+        }
+
+        /// <summary>
+        /// Computes a distribution <c>g(b) = sum_a f(a) T(a, b)</c>, where <c>f(a)</c> is the current distribution and <c>T(a, b)</c> is a given transducer.
+        /// </summary>
+        /// <param name="transducer">The transducer to project on.</param>
+        /// <returns>The projection.</returns>
+        public TThis ApplyTransducer<TTransducer>(TTransducer transducer) where TTransducer : Transducer<TSequence, TElement, TElementDistribution, TSequenceManipulator, TAutomaton, TTransducer>, new()
+            => FromWeightFunction(IsPointMass ? transducer.ProjectSource(Point) : transducer.ProjectSource(ToAutomaton()));
 
         #endregion
 
@@ -1041,17 +1044,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// </summary>
         /// <param name="appendRegex">Optional method for appending at the element distribution level.</param>
         /// <returns>A string that represents the automaton.</returns>
-        protected string ToString(Action<TElementDistribution, StringBuilder> appendRegex)
-        {
-            if (this.IsPointMass)
-            {
-                return this.Point.ToString();
-            }
-            else
-            {
-                return this.GetWorkspaceOrPoint().ToString(appendRegex);
-            }
-        }
+        protected string ToString(Action<TElementDistribution, StringBuilder> appendRegex) => sequenceToWeight.ToString(appendRegex);
 
         /// <summary>
         /// Returns a string that represents the distribution.
@@ -1060,8 +1053,8 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// <returns>A string that represents the distribution.</returns>
         public string ToString(ISequenceDistributionFormat format)
         {
-            Argument.CheckIfNotNull(format, "format");
-            return format.ConvertToString<TSequence, TElement, TElementDistribution, TSequenceManipulator, TWeightFunction, TThis>((TThis)this);
+            Argument.CheckIfNotNull(format, nameof(format));
+            return format.ConvertToString<TSequence, TElement, TElementDistribution, TSequenceManipulator, TAutomaton, TWeightFunction, TWeightFunctionFactory, TThis>((TThis)this);
         }
 
         #endregion
@@ -1070,22 +1063,13 @@ namespace Microsoft.ML.Probabilistic.Distributions
 
         public bool HasGroup(int group)
         {
-            if (this.IsPointMass)
-            {
-                return false; // TODO: get rid of groups or do something about groups + point mass combo
-            }
-            
-            return this.sequenceToWeight.HasGroup(group);
+            return sequenceToWeight.HasGroup(group);
         }
    
         public Dictionary<int, TThis> GetGroups()
         {
-            if (this.IsPointMass)
-            {
-                return new Dictionary<int, TThis>(); // TODO: get rid of groups or do something about groups + point mass combo
-            }
-
-            return this.sequenceToWeight.GetGroups().ToDictionary(x => x.Key, x => FromWorkspace(x.Value));
+            // TODO: get rid of groups or do something about groups + point mass combo
+            return this.sequenceToWeight.GetGroups().ToDictionary(x => x.Key, x => FromWeightFunction(x.Value));
         }
 
         #endregion
@@ -1098,15 +1082,14 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// <param name="that">The distribution to set the current distribution to.</param>
         public void SetTo(TThis that)
         {
-            Argument.CheckIfNotNull(that, "that");
+            Argument.CheckIfNotNull(that, nameof(that));
             
             if (ReferenceEquals(this, that))
             {
                 return;
             }
 
-            this.point = that.point;
-            this.sequenceToWeight = that.sequenceToWeight?.Clone();
+            this.sequenceToWeight = that.sequenceToWeight;
             this.isNormalized = that.isNormalized;
         }
 
@@ -1115,8 +1098,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// </summary>
         public void SetToZero()
         {
-            this.point = null;
-            this.sequenceToWeight = Automaton<TSequence, TElement, TElementDistribution, TSequenceManipulator, TWeightFunction>.Zero();
+            this.sequenceToWeight = WeightFunctionFactory.Zero();
             this.isNormalized = true;
         }
 
@@ -1173,17 +1155,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// <returns>The logarithm of the probability that distributions would draw the same sample.</returns>
         public double GetLogAverageOf(TThis that)
         {
-            Argument.CheckIfNotNull(that, "that");
-            
-            if (that.IsPointMass)
-            {
-                return this.GetLogProb(that.point);
-            }
-
-            if (this.IsPointMass)
-            {
-                return that.GetLogProb(this.point);
-            }
+            Argument.CheckIfNotNull(that, nameof(that));
 
             var temp = new TThis();
             return temp.SetToProductAndReturnLogNormalizer((TThis)this, that, false);
@@ -1295,12 +1267,10 @@ namespace Microsoft.ML.Probabilistic.Distributions
             logWeight1 -= weightSum;
             logWeight2 -= weightSum;
 
-            this.SetWorkspace(
-                Automaton<TSequence, TElement, TElementDistribution, TSequenceManipulator, TWeightFunction>.WeightedSumLog(
-                    logWeight1,
-                    dist1.GetNormalizedWorkspaceOrPoint(),
-                    logWeight2,
-                    dist2.GetNormalizedWorkspaceOrPoint()));
+            dist1.EnsureNormalized();
+            dist2.EnsureNormalized();
+
+            SetWeightFunction(dist1.sequenceToWeight.SumLog(logWeight1, dist2.sequenceToWeight, logWeight2));
         }
 
         /// <summary>
@@ -1367,9 +1337,11 @@ namespace Microsoft.ML.Probabilistic.Distributions
             {
                 return double.PositiveInfinity;
             }
+
+            EnsureNormalized();
+            thatDistribution.EnsureNormalized();
             
-            return Math.Exp(Automaton<TSequence, TElement, TElementDistribution, TSequenceManipulator, TWeightFunction>.GetLogSimilarity(
-                this.GetNormalizedWorkspaceOrPoint(), thatDistribution.GetNormalizedWorkspaceOrPoint()));
+            return sequenceToWeight.MaxDiff(thatDistribution.sequenceToWeight);
         }
 
         /// <summary>
@@ -1381,16 +1353,6 @@ namespace Microsoft.ML.Probabilistic.Distributions
         public double GetLogProb(TSequence sequence)
         {
             Argument.CheckIfNotNull(sequence, "sequence");
-            
-            if (this.IsPointMass)
-            {
-                if (SequenceManipulator.SequencesAreEqual(sequence, this.point))
-                {
-                    return 0;
-                }
-
-                return double.NegativeInfinity;
-            }
 
             this.EnsureNormalized();
             return this.sequenceToWeight.GetLogValue(sequence);
@@ -1404,11 +1366,6 @@ namespace Microsoft.ML.Probabilistic.Distributions
         public bool Contains(TSequence sequence)
         {
             Argument.CheckIfNotNull(sequence, "sequence");
-
-            if (this.IsPointMass)
-            {
-                return SequenceManipulator.SequencesAreEqual(sequence, this.point);
-            }
 
             // todo: stop GetLogValue early as soon as we know the weight is not neg infinity.
             var logWeight = this.sequenceToWeight.GetLogValue(sequence);
@@ -1450,12 +1407,11 @@ namespace Microsoft.ML.Probabilistic.Distributions
             TThis properDist = (TThis)this;
             if (!this.IsProper())
             {
-                var weightFunction = this.GetWorkspaceOrPoint();
+                var weightFunction = this.ToAutomaton();
                 var theConverger =
-                    Automaton<TSequence, TElement, TElementDistribution, TSequenceManipulator, TWeightFunction>.GetConverger(weightFunction);
+                    Automaton<TSequence, TElement, TElementDistribution, TSequenceManipulator, TAutomaton>.GetConverger(weightFunction);
                 var properWeightFunction = weightFunction.Product(theConverger);
-                properDist = this.Clone();
-                properDist.SetWeightFunction(properWeightFunction);
+                properDist = FromWeightFunction(properWeightFunction);
             }
 
             return SampleFromProperDistribution(properDist);
@@ -1470,7 +1426,8 @@ namespace Microsoft.ML.Probabilistic.Distributions
             dist.EnsureNormalized();
 
             var sampledElements = new List<TElement>();
-            var currentState = dist.sequenceToWeight.Start;
+            var automaton = dist.sequenceToWeight.AsAutomaton();
+            var currentState = automaton.Start;
             while (true)
             {
                 double logSample = Math.Log(Rand.Double());
@@ -1485,7 +1442,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
                             sampledElements.Add(transition.ElementDistribution.Value.Sample());
                         }
 
-                        currentState = dist.sequenceToWeight.States[transition.DestinationStateIndex];
+                        currentState = automaton.States[transition.DestinationStateIndex];
                         break;
                     }
                 }
@@ -1513,13 +1470,14 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// </summary>
         public void SetToUniform()
         {
-            this.SetToUniformOf(Distribution.CreateUniform<TElementDistribution>());
+            this.SetToUniformOf(ElementDistributionFactory.CreateUniform());
         }
 
         /// <summary>
         /// Sets the distribution to be uniform over its support.
         /// </summary>
-        /// <remarks>This function will fail if the workspace of this distribution cannot be determinized.</remarks>
+        /// <remarks>This function will fail if the weight function of this distribution
+        /// is represented by an automaton that cannot be determinized.</remarks>
         public void SetToPartialUniform()
         {
             this.SetToPartialUniformOf((TThis)this);
@@ -1529,18 +1487,12 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// Sets the distribution to be uniform over the support of a given distribution.
         /// </summary>
         /// <param name="dist">The distribution which support will be used to setup the current distribution.</param>
-        /// <remarks>This function will fail if the workspace of <paramref name="dist"/> cannot be determinized.</remarks>
+        /// <remarks>This function will fail if the weight function of <paramref name="dist"/>
+        /// is represented by an automaton that cannot be determinized.</remarks>
         public void SetToPartialUniformOf(TThis dist)
         {
-            if (dist.IsPointMass)
-            {
-                this.Point = dist.Point;
-                return;
-            }
-            
-            var resultWorkspace = new TWeightFunction();
-            resultWorkspace.SetToConstantOnSupportOfLog(0.0, dist.GetWorkspaceOrPoint());
-            this.SetWorkspace(resultWorkspace, false);
+            var resultWeightFunction = WeightFunctionFactory.ConstantOnSupportOfLog(0.0, dist.GetWeightFunction());
+            SetWeightFunction(resultWeightFunction, false);
         }
 
         /// <summary>
@@ -1558,11 +1510,6 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// <returns><see langword="true"/> if the current distribution is proper, <see langword="false"/> otherwise.</returns>
         public bool IsProper()
         {
-            if (this.IsPointMass)
-            {
-                return true;
-            }
-
             return !double.IsInfinity(this.sequenceToWeight.GetLogNormalizer()); // TODO: cache?
         }
         
@@ -1596,7 +1543,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// <returns>True if the distribution is canonically uniform</returns>
         private bool IsCanonicUniform()
         {
-            return this.GetWorkspaceOrPoint().IsCanonicConstant();
+            return this.ToAutomaton().IsCanonicConstant();
         }
 
         /// <summary>
@@ -1609,7 +1556,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// </returns>
         public bool IsZero()
         {
-            return !this.IsPointMass && this.sequenceToWeight.IsZero();
+            return this.sequenceToWeight.IsZero();
         }
 
         /// <summary>
@@ -1621,12 +1568,12 @@ namespace Microsoft.ML.Probabilistic.Distributions
         public static TThis Converge(TThis dist, double decayWeight = 0.99)
         {
             var converger =
-                Automaton<TSequence, TElement, TElementDistribution, TSequenceManipulator, TWeightFunction>
-                    .GetConverger(new TWeightFunction[]
+                Automaton<TSequence, TElement, TElementDistribution, TSequenceManipulator, TAutomaton>
+                    .GetConverger(new TAutomaton[]
                     {
-                        dist.sequenceToWeight
+                        dist.sequenceToWeight.AsAutomaton()
                     }, decayWeight);
-            return dist.Product(FromWorkspace(converger));
+            return dist.Product(FromWeightFunction(converger));
         }
 
         /// <summary>
@@ -1642,25 +1589,9 @@ namespace Microsoft.ML.Probabilistic.Distributions
             }
 
             TThis that = (TThis)obj;
-            if (this.IsPointMass)
-            {
-                if (!that.IsPointMass)
-                {
-                    return false;
-                }
-
-                // todo: use sequence manipulator equality
-                return Equals(this.Point, that.Point);
-            }
-            else
-            {
-                if (that.IsPointMass)
-                {
-                    return false;
-                }
-            }
-
-            return this.GetNormalizedWorkspaceOrPoint().Equals(that.GetNormalizedWorkspaceOrPoint());
+            EnsureNormalized();
+            that.EnsureNormalized();
+            return sequenceToWeight.Equals(that.sequenceToWeight);
         }
 
         /// <summary>
@@ -1669,7 +1600,8 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// <returns>The hash code.</returns>
         public override int GetHashCode()
         {
-            return this.GetNormalizedWorkspaceOrPoint().GetHashCode();
+            EnsureNormalized();
+            return sequenceToWeight.GetHashCode();
         }
 
         #endregion
@@ -1700,9 +1632,10 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// <param name="uniformLogProb">The logarithm of the probability assigned to every allowed sequence.</param>
         protected void SetToUniformOf(TElementDistribution allowedElements, double uniformLogProb)
         {
-            Argument.CheckIfNotNull(allowedElements, "allowedElements");
+            Argument.CheckIfNotNull(allowedElements, nameof(allowedElements));
 
-            this.SetWorkspace(Automaton<TSequence, TElement, TElementDistribution, TSequenceManipulator, TWeightFunction>.ConstantLog(uniformLogProb, allowedElements), false);
+            var weightFunction = WeightFunctionFactory.ConstantLog(uniformLogProb, allowedElements);
+            SetWeightFunction(weightFunction, false);
         }
 
         #endregion
@@ -1719,74 +1652,17 @@ namespace Microsoft.ML.Probabilistic.Distributions
         private double? DoSetToProduct(TThis dist1, TThis dist2, bool computeLogNormalizer, bool tryDeterminize = true)
         {
             Debug.Assert(dist1 != null && dist2 != null, "Valid distributions must be provided.");
-            
-            if (dist1.IsPointMass)
-            {
-                var pt = dist1.Point;
-                bool containsPoint = false;
-                double? logNorm = null;
-                if (computeLogNormalizer)
-                {
-                    logNorm = dist2.GetLogProb(pt);
-                    containsPoint = !double.IsNegativeInfinity(logNorm.Value);
-                }
-                else
-                {
-                    containsPoint = dist2.Contains(pt);
-                }
-                
-                if (containsPoint)
-                {
-                    this.SetTo(dist1);
-                }
-                else
-                {
-                    this.SetToZero();
-                }
-
-                return logNorm;
-            }
-
-            if (dist2.IsPointMass)
-            {
-                var pt = dist2.Point;
-                bool containsPoint = false;
-                double? logNorm = null;
-
-                if (computeLogNormalizer)
-                {
-                    logNorm = dist1.GetLogProb(pt);
-                    containsPoint = !double.IsNegativeInfinity(logNorm.Value);
-                } else
-                {
-                    containsPoint = dist1.Contains(pt);
-                }
-                
-                if (!containsPoint)
-                {
-                    this.SetToZero();
-                    return logNorm;
-                }
-
-                if (!dist1.UsesGroups())
-                {
-                    this.Point = pt;
-                    return logNorm;
-                }
-            }
 
             if (computeLogNormalizer)
             {
                 dist1.EnsureNormalized();
                 dist2.EnsureNormalized();    
             }
-            
-            var weightFunction1 = dist1.GetWorkspaceOrPoint();
-            var weightFunction2 = dist2.GetWorkspaceOrPoint();
-            var product = weightFunction1.Product(weightFunction2, tryDeterminize);
-            this.SetWorkspace(product);
+
+            var product = dist1.sequenceToWeight.Product(dist2.sequenceToWeight);
 
             double? logNormalizer = null;
+            bool didNormalize = false;
             if (computeLogNormalizer)
             {
                 if (product.IsZero())
@@ -1798,27 +1674,38 @@ namespace Microsoft.ML.Probabilistic.Distributions
                     double computedLogNormalizer;
 
                     // todo: consider moving the following logic into the Automaton class
-                    if (!product.TryNormalizeValues(out computedLogNormalizer))
+                    if (!product.TryNormalizeValues(out product, out computedLogNormalizer))
                     {
                         computedLogNormalizer = 0;
                     }
 
-                    if (weightFunction1.LogValueOverride != null)
+                    if (dist1.UsesAutomatonRepresentation)
                     {
-                        computedLogNormalizer = weightFunction1.LogValueOverride.Value;
+                        var logValueOverride1 = dist1.sequenceToWeight.AsAutomaton().LogValueOverride;
+                        if (logValueOverride1 != null)
+                        {
+                            computedLogNormalizer = logValueOverride1.Value;
+                        }
                     }
 
-                    if (weightFunction2.LogValueOverride != null)
+                    if (dist2.UsesAutomatonRepresentation)
                     {
-                        computedLogNormalizer = Math.Min(computedLogNormalizer, weightFunction2.LogValueOverride.Value);
+                        var logValueOverride2 = dist2.sequenceToWeight.AsAutomaton().LogValueOverride;
+                        if (logValueOverride2 != null)
+                        {
+                            computedLogNormalizer = Math.Min(computedLogNormalizer, logValueOverride2.Value);
+                        }
                     }
 
                     logNormalizer = computedLogNormalizer;    
                 }
-                
-                this.isNormalized = true;
+
+                didNormalize = true;
             }
-            
+
+            SetWeightFunction(product);
+            isNormalized = didNormalize;
+
             return logNormalizer;
         }
         
@@ -1828,11 +1715,6 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// <returns><see langword="true"/> if the distribution uses groups, <see langword="false"/> otherwise.</returns>
         private bool UsesGroups()
         {
-            if (this.IsPointMass)
-            {
-                return false;
-            }
-
             return this.sequenceToWeight.UsesGroups;
         }
 
@@ -1844,7 +1726,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
         {
             if (!this.isNormalized)
             {
-                this.sequenceToWeight.TryNormalizeValues();
+                sequenceToWeight.TryNormalizeValues(out sequenceToWeight, out _);
                 this.isNormalized = true;
             }
         }
@@ -1855,39 +1737,25 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// </summary>
         private void NormalizeStructure()
         {
-            if (this.UsesGroups())
-            {
-                return; // todo: remove groups
-            }
-
-            var pt = this.TryComputePoint();
-            if (pt != null)
-            {
-                this.Point = pt;
-            }
+            sequenceToWeight = sequenceToWeight.NormalizeStructure();
         }
 
-        /// <summary>
-        /// Returns a point mass represented by the current distribution, or <see langword="null"/>,
-        /// if it doesn't represent a point mass.
-        /// </summary>
-        /// <returns>The point mass represented by the distribution, or <see langword="null"/>.</returns>
-        private TSequence TryComputePoint()
+        private void TryDeterminizeBeforeSupportEnumeration()
         {
-            if (this.IsPointMass)
+            if (sequenceToWeight.UsesAutomatonRepresentation
+                    && sequenceToWeight.AsAutomaton() is StringAutomaton sa
+                    && sa.Data.IsEnumerable != false)
             {
-                return this.point;
+                // Determinization of automaton may fail if distribution is not normalized.
+                this.EnsureNormalized();
+                var determinizedAutomaton = sequenceToWeight.AsAutomaton().TryDeterminize();
+                // Sometimes automaton is not determinized, but is still made epsilon-free,
+                // which is a nice optimization to keep.
+                sequenceToWeight = WeightFunctionFactory.FromAutomaton(determinizedAutomaton);
             }
-
-            return this.sequenceToWeight.TryComputePoint();
         }
 
-        #endregion    
-
-        /// <summary>
-        /// Whether sequenceToWeight needs to be serialized.
-        /// </summary>
-        public bool ShouldSerializesequenceToWeight() => point == null;
+        #endregion
 
     }
 }

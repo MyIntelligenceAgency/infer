@@ -20,11 +20,19 @@ namespace Microsoft.ML.Probabilistic.Distributions
     [DataContract]
     [Quality(QualityBand.Preview)]
     public class StringDistribution :
-        SequenceDistribution<string, char, DiscreteChar, StringManipulator, StringAutomaton, StringDistribution>
+        SequenceDistribution<
+            string,
+            char,
+            ImmutableDiscreteChar,
+            StringManipulator,
+            StringAutomaton,
+            WeightFunctions<string, char, ImmutableDiscreteChar, StringManipulator, StringAutomaton>.MultiRepresentationWeightFunction<StringDictionaryWeightFunction>,
+            WeightFunctions<string, char, ImmutableDiscreteChar, StringManipulator, StringAutomaton>.MultiRepresentationWeightFunction<StringDictionaryWeightFunction>.Factory,
+            StringDistribution>
     {
         /// <summary>
         /// Concatenates the weighted regular languages defined by given distributions
-        /// (see <see cref="SequenceDistribution{TSequence,TElement,TElementDistribution,TSequenceManipulator,TWeightFunction,TThis}.Append(TThis, int)"/>).
+        /// (see <see cref="SequenceDistribution{TSequence, TElement, TElementDistribution, TSequenceManipulator, TAutomaton, TWeightFunction, TWeightFunctionFactory, TThis}.Append(TThis, int)"/>).
         /// </summary>
         /// <param name="first">The first distribution.</param>
         /// <param name="second">The second distribution.</param>
@@ -36,7 +44,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
 
         /// <summary>
         /// Creates a point mass distribution.
-        /// This method is an alias for <see cref="SequenceDistribution{TSequence, TElement, TElementDistribution, TSequenceManipulator, TWeightFunction, TThis}.PointMass"/>.
+        /// This method is an alias for <see cref="SequenceDistribution{TSequence, TElement, TElementDistribution, TSequenceManipulator, TAutomaton, TWeightFunction, TWeightFunctionFactory, TThis}.PointMass"/>.
         /// </summary>
         /// <param name="str">The point.</param>
         /// <returns>The created point mass distribution.</returns>
@@ -44,10 +52,10 @@ namespace Microsoft.ML.Probabilistic.Distributions
         {
             return StringDistribution.PointMass(str);
         }
-        
+
         /// <summary>
         /// Creates a distribution which puts all mass on a string containing only a given character.
-        /// This method is an alias for <see cref="SequenceDistribution{TSequence, TElement, TElementDistribution, TSequenceManipulator, TWeightFunction, TThis}.SingleElement(TElement)"/>.
+        /// This method is an alias for <see cref="SequenceDistribution{TSequence, TElement, TElementDistribution, TSequenceManipulator, TAutomaton, TWeightFunction, TWeightFunctionFactory, TThis}.SingleElement(TElement)"/>.
         /// </summary>
         /// <param name="ch">The character.</param>
         /// <returns>The created distribution.</returns>
@@ -58,18 +66,34 @@ namespace Microsoft.ML.Probabilistic.Distributions
 
         /// <summary>
         /// Creates a distribution over strings of length 1 induced by a given distribution over characters.
-        /// This method is an alias for <see cref="SequenceDistribution{TSequence, TElement, TElementDistribution, TSequenceManipulator, TWeightFunction, TThis}.SingleElement(TElementDistribution)"/>.
+        /// This method is an alias for <see cref="SequenceDistribution{TSequence, TElement, TElementDistribution, TSequenceManipulator, TAutomaton, TWeightFunction, TWeightFunctionFactory, TThis}.SingleElement(TElementDistribution)"/>.
         /// </summary>
         /// <param name="characterDist">The distribution over characters.</param>
         /// <returns>The created distribution.</returns>
         /// <remarks>
         /// The distribution created by this method can differ from the result of
-        /// <see cref="SequenceDistribution{TSequence, TElement, TElementDistribution, TSequenceManipulator, TWeightFunction, TThis}.Repeat(TThis, int, int?)"/>
+        /// <see cref="SequenceDistribution{TSequence, TElement, TElementDistribution, TSequenceManipulator, TAutomaton, TWeightFunction, TWeightFunctionFactory, TThis}.Repeat(TThis, int, int?)"/>
+        /// with both min and max length set to 1 since the latter always creates a partial uniform distribution.
+        /// </remarks>
+        public static StringDistribution Char(ImmutableDiscreteChar characterDist)
+        {
+            return StringDistribution.SingleElement(characterDist);
+        }
+
+        /// <summary>
+        /// Creates a distribution over strings of length 1 induced by a given distribution over characters.
+        /// This method is an alias for <see cref="SequenceDistribution{TSequence, TElement, TElementDistribution, TSequenceManipulator, TAutomaton, TWeightFunction, TWeightFunctionFactory, TThis}.SingleElement(TElementDistribution)"/>.
+        /// </summary>
+        /// <param name="characterDist">The distribution over characters.</param>
+        /// <returns>The created distribution.</returns>
+        /// <remarks>
+        /// The distribution created by this method can differ from the result of
+        /// <see cref="SequenceDistribution{TSequence, TElement, TElementDistribution, TSequenceManipulator, TAutomaton, TWeightFunction, TWeightFunctionFactory, TThis}.Repeat(TThis, int, int?)"/>
         /// with both min and max length set to 1 since the latter always creates a partial uniform distribution.
         /// </remarks>
         public static StringDistribution Char(DiscreteChar characterDist)
         {
-            return StringDistribution.SingleElement(characterDist);
+            return StringDistribution.SingleElement(characterDist.WrappedDistribution);
         }
 
         /// <summary>
@@ -86,8 +110,8 @@ namespace Microsoft.ML.Probabilistic.Distributions
                         var lower = char.ToLowerInvariant(ch);
                         return
                             upper == lower
-                                ? DiscreteChar.PointMass(lower)
-                                : DiscreteChar.OneOf(lower, upper);
+                                ? ImmutableDiscreteChar.PointMass(lower)
+                                : ImmutableDiscreteChar.OneOf(lower, upper);
                     }));
 
         /// <summary>
@@ -103,7 +127,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// <returns>The created distribution.</returns>
         public static StringDistribution Lower(int minLength = 1, int? maxLength = null)
         {
-            return StringDistribution.Repeat(DiscreteChar.Lower(), minLength, maxLength);
+            return StringDistribution.Repeat(ImmutableDiscreteChar.Lower(), minLength, maxLength);
         }
 
         /// <summary>
@@ -119,7 +143,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// <returns>The created distribution.</returns>
         public static StringDistribution Upper(int minLength = 1, int? maxLength = null)
         {
-            return StringDistribution.Repeat(DiscreteChar.Upper(), minLength, maxLength);
+            return StringDistribution.Repeat(ImmutableDiscreteChar.Upper(), minLength, maxLength);
         }
 
         /// <summary>
@@ -135,7 +159,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// <returns>The created distribution.</returns>
         public static StringDistribution Letters(int minLength = 1, int? maxLength = null)
         {
-            return StringDistribution.Repeat(DiscreteChar.Letter(), minLength, maxLength);
+            return StringDistribution.Repeat(ImmutableDiscreteChar.Letter(), minLength, maxLength);
         }
 
         /// <summary>
@@ -152,7 +176,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// <returns>The created distribution.</returns>
         public static StringDistribution Digits(int minLength = 1, int? maxLength = null, DistributionKind uniformity = DistributionKind.UniformOverValue)
         {
-            return StringDistribution.Repeat(DiscreteChar.Digit(), minLength, maxLength, uniformity);
+            return StringDistribution.Repeat(ImmutableDiscreteChar.Digit(), minLength, maxLength, uniformity);
         }
 
         /// <summary>
@@ -168,7 +192,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// <returns>The created distribution.</returns>
         public static StringDistribution LettersOrDigits(int minLength = 1, int? maxLength = null)
         {
-            return StringDistribution.Repeat(DiscreteChar.LetterOrDigit(), minLength, maxLength);
+            return StringDistribution.Repeat(ImmutableDiscreteChar.LetterOrDigit(), minLength, maxLength);
         }
 
         /// <summary>
@@ -185,7 +209,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// <returns>The created distribution.</returns>
         public static StringDistribution WordChars(int minLength = 1, int? maxLength = null)
         {
-            return StringDistribution.Repeat(DiscreteChar.WordChar(), minLength, maxLength);
+            return StringDistribution.Repeat(ImmutableDiscreteChar.WordChar(), minLength, maxLength);
         }
 
         /// <summary>
@@ -202,7 +226,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// <returns>The created distribution.</returns>
         public static StringDistribution Whitespace(int minLength = 1, int? maxLength = null)
         {
-            return StringDistribution.Repeat(DiscreteChar.Whitespace(), minLength, maxLength);
+            return StringDistribution.Repeat(ImmutableDiscreteChar.Whitespace(), minLength, maxLength);
         }
 
         /// <summary>
@@ -223,7 +247,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
             Argument.CheckIfInRange(minLength >= 1, "minLength", "The minimum length of a capitalized string should be 1 or more.");
             Argument.CheckIfValid(!maxLength.HasValue || maxLength.Value >= minLength, "The maximum length cannot be less than the minimum length.");
 
-            var result = StringDistribution.Char(DiscreteChar.Upper());
+            var result = StringDistribution.Char(ImmutableDiscreteChar.Upper());
             
             if (maxLength.HasValue)
             {
@@ -236,12 +260,34 @@ namespace Microsoft.ML.Probabilistic.Distributions
                 // Concatenation with an improper distribution, need to adjust its scale so that the result is 1 on its support
                 double logNormalizer = result.GetLogAverageOf(result);
                 var lowercaseSuffixFunc = (allowUpperAfterFirst ? StringDistribution.Letters(minLength: minLength - 1) 
-                    : StringDistribution.Lower(minLength: minLength - 1)).GetNormalizedWorkspaceOrPoint();
+                    : StringDistribution.Lower(minLength: minLength - 1)).ToNormalizedAutomaton();
                 var lowercaseSuffixFuncScaled = lowercaseSuffixFunc.ScaleLog(-logNormalizer);
-                result.AppendInPlace(StringDistribution.FromWorkspace(lowercaseSuffixFuncScaled));    
+                result.AppendInPlace(StringDistribution.FromWeightFunction(lowercaseSuffixFuncScaled));    
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Replaces the current distribution by a distribution over concatenations of sequences
+        /// from the current distribution and a given element.
+        /// </summary>
+        /// <param name="element">The element to append.</param>
+        /// <param name="group">The group for the appended element.</param>
+        /// <remarks>
+        /// The result is equivalent to the distribution produced by the following sampling procedure:
+        /// <list type="number">
+        /// <item><description>
+        /// Sample a random sequence from the current distribution.
+        /// </description></item>
+        /// <item><description>
+        /// Append the given element to the sampled sequence and output the result.
+        /// </description></item>
+        /// </list>
+        /// </remarks>
+        public void AppendInPlace(DiscreteChar element, int group = 0)
+        {
+            this.AppendInPlace(SingleElement(element.WrappedDistribution), group);
         }
 
         /// <summary>

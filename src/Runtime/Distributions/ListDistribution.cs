@@ -21,9 +21,19 @@ namespace Microsoft.ML.Probabilistic.Distributions
     [Serializable]
     [Quality(QualityBand.Experimental)]
     public abstract class ListDistribution<TList, TElement, TElementDistribution, TThis> :
-        SequenceDistribution<TList, TElement, TElementDistribution, ListManipulator<TList, TElement>, ListAutomaton<TList, TElement, TElementDistribution>, TThis>
+        SequenceDistribution<
+            TList,
+            TElement,
+            TElementDistribution,
+            ListManipulator<TList, TElement>,
+            ListAutomaton<TList, TElement, TElementDistribution>,
+            WeightFunctions<TList, TElement, TElementDistribution, ListManipulator<TList, TElement>, ListAutomaton<TList, TElement, TElementDistribution>>
+                .MultiRepresentationWeightFunction<ListDictionaryWeightFunction<TList, TElement, TElementDistribution>>,
+            WeightFunctions<TList, TElement, TElementDistribution, ListManipulator<TList, TElement>, ListAutomaton<TList, TElement, TElementDistribution>>
+                .MultiRepresentationWeightFunction<ListDictionaryWeightFunction<TList, TElement, TElementDistribution>>.Factory,
+            TThis>
         where TList : class, IList<TElement>, new()
-        where TElementDistribution : IDistribution<TElement>, SettableToProduct<TElementDistribution>, SettableToWeightedSumExact<TElementDistribution>, CanGetLogAverageOf<TElementDistribution>, SettableToPartialUniform<TElementDistribution>, Sampleable<TElement>, new()
+        where TElementDistribution : IImmutableDistribution<TElement, TElementDistribution>, CanGetLogAverageOf<TElementDistribution>, CanComputeProduct<TElementDistribution>, CanCreatePartialUniform<TElementDistribution>, SummableExactly<TElementDistribution>, Sampleable<TElement>, new()
         where TThis : ListDistribution<TList, TElement, TElementDistribution, TThis>, new()
     {
     }
@@ -39,7 +49,7 @@ namespace Microsoft.ML.Probabilistic.Distributions
     public class ListDistribution<TList, TElement, TElementDistribution> :
         ListDistribution<TList, TElement, TElementDistribution, ListDistribution<TList, TElement, TElementDistribution>>
         where TList : class, IList<TElement>, new()
-        where TElementDistribution : IDistribution<TElement>, SettableToProduct<TElementDistribution>, SettableToWeightedSumExact<TElementDistribution>, CanGetLogAverageOf<TElementDistribution>, SettableToPartialUniform<TElementDistribution>, Sampleable<TElement>, new()
+        where TElementDistribution : IImmutableDistribution<TElement, TElementDistribution>, CanGetLogAverageOf<TElementDistribution>, CanComputeProduct<TElementDistribution>, CanCreatePartialUniform<TElementDistribution>, SummableExactly<TElementDistribution>, Sampleable<TElement>, new()
     {
     }
 
@@ -51,8 +61,18 @@ namespace Microsoft.ML.Probabilistic.Distributions
     [Serializable]
     [Quality(QualityBand.Experimental)]
     public class ListDistribution<TElement, TElementDistribution> :
-        SequenceDistribution<List<TElement>, TElement, TElementDistribution, ListManipulator<List<TElement>, TElement>, ListAutomaton<TElement, TElementDistribution>, ListDistribution<TElement, TElementDistribution>>
-        where TElementDistribution : IDistribution<TElement>, SettableToProduct<TElementDistribution>, SettableToWeightedSumExact<TElementDistribution>, CanGetLogAverageOf<TElementDistribution>, SettableToPartialUniform<TElementDistribution>, Sampleable<TElement>, new()
+        SequenceDistribution<
+            List<TElement>,
+            TElement,
+            TElementDistribution,
+            ListManipulator<List<TElement>, TElement>,
+            ListAutomaton<TElement, TElementDistribution>,
+            WeightFunctions<List<TElement>, TElement, TElementDistribution, ListManipulator<List<TElement>, TElement>, ListAutomaton<TElement, TElementDistribution>>
+                .MultiRepresentationWeightFunction<ListDictionaryWeightFunction<TElement, TElementDistribution>>,
+            WeightFunctions<List<TElement>, TElement, TElementDistribution, ListManipulator<List<TElement>, TElement>, ListAutomaton<TElement, TElementDistribution>>
+                .MultiRepresentationWeightFunction<ListDictionaryWeightFunction<TElement, TElementDistribution>>.Factory,
+            ListDistribution<TElement, TElementDistribution>>
+        where TElementDistribution : IImmutableDistribution<TElement, TElementDistribution>, CanGetLogAverageOf<TElementDistribution>, CanComputeProduct<TElementDistribution>, CanCreatePartialUniform<TElementDistribution>, SummableExactly<TElementDistribution>, Sampleable<TElement>, new()
     {
     }
 }

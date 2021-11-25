@@ -20,12 +20,20 @@ All of the Infer&#46;NET libraries target .NET Standard 2.0. Projects that produ
 1. If you don't have Visual Studio 2019, you can install the free [Visual Studio 2019 Community](https://visualstudio.microsoft.com/vs/community/).
 1. Start Visual Studio.
 1. Select `File -> Open -> Project/Solution` and open the `Infer.sln` solution file located in your cloned repository.
-1. Select a build configuration using `Build -> Configuration Manager...`.  When switching between configurations that change the targeted frameworks, Visual Studio currently requires you to close and re-open the solution file using `File -> Close Solution` and `File -> Open`.
+1. Select a build configuration using `Build -> Configuration Manager...`.  After switching between configurations that change the targeted frameworks, Visual Studio currently requires you to close and re-open the solution file using `File -> Close Solution` and `File -> Open`.
 1. Compile using `Build -> Build Solution`.
 1. At this point, you can play with the [tutorials and examples](https://dotnet.github.io/infer/userguide/Infer.NET%20tutorials%20and%20examples.html), or run all tests to verify the installation.  Run the tutorials by setting the startup project to `Tutorials`.  If your configuration is `DebugFull` or `ReleaseFull`, you will get the [Examples Browser](https://dotnet.github.io/infer/userguide/The%20examples%20browser.html).  Otherwise, edit `src/Tutorials/RunMe.cs` to see different tutorials.  Run an example by setting the startup project to that example.
 1. To run all tests, open the test explorer using `Test -> Windows -> Test Explorer`.
 1. In the test explorer search bar, type `-Trait:"BadTest" -Trait:"OpenBug" -Trait:"CompilerOptionsTest" -Trait:"Performance" -Trait:"Platform"` to exclude long-running tests and tests that are not supposed to succeed.
 1. Click `Run All`.
+
+## Building with Visual Studio Code
+
+1. Launch [Visual Studio Code](https://code.visualstudio.com/). 
+1. Select the Extensions button on the left, then install C# and the NuGet Package Manager extensions. 
+1. Select File -> Open Folder.. and select the folder containing Infer.sln. 
+1. Press F5 or select Run -> Start Debugging.  When prompted, select .NET Core and then select the example that you want to run.
+1. For more details, see the [README for the C# extension](https://github.com/OmniSharp/omnisharp-vscode/blob/master/debugger.md).
 
 ## Building from the command line
 
@@ -91,7 +99,7 @@ In Runtime project settings > Build:
 1. Add ";LAPACK" to the Conditional compilation symbols.
 1. Check `Allow unsafe code`.
 
-You can also use other BLAS/LAPACK libraries compatible with MKL.  If your library is not called "mkl_rt.dll", change the `dllName` string in [Lapack.cs](https://github.com/dotnet/infer/blob/master/src/Runtime/Core/Maths/Lapack.cs).
+You can also use other BLAS/LAPACK libraries compatible with MKL.  If your library is not called "mkl_rt.dll", change the `dllName` string in [Lapack.cs](https://github.com/dotnet/infer/blob/main/src/Runtime/Core/Maths/Lapack.cs).
 
 When using this special build of Infer.NET, you must tell your code where to find the MKL dynamic libraries.
 1. Download [Intel MKL](https://software.intel.com/en-us/mkl/) which includes redistributables. Typically, this is installed in  `C:\Program Files (x86)\IntelSWTools\compilers_and_libraries\windows\redist\intel64_win`. We'll reference this folder as *MKL_DIR*.

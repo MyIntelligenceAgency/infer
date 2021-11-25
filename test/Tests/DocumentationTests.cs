@@ -137,7 +137,7 @@ namespace Microsoft.ML.Probabilistic.Tests
         [Fact]
         public void MissingOperatorExample()
         {
-            try
+            Assert.Throws<CompilationFailedException>(() =>
             {
                 // WARNING: If you change anything here, you must update the documentation            
                 Variable<double> meanA = Variable.GaussianFromMeanAndVariance(0, 100);
@@ -164,15 +164,7 @@ namespace Microsoft.ML.Probabilistic.Tests
                 Console.WriteLine("prec A = " + marginalPrecisionA);
                 Console.WriteLine("mean B = " + marginalMeanB);
                 Console.WriteLine("prec B = " + marginalPrecisionB);
-            }
-            catch (NotSupportedException ex)
-            {
-                Console.WriteLine(ex);
-            }
-            catch (CompilationFailedException ex)
-            {
-                Console.WriteLine(ex);
-            }
+            });
         }
 
         /// <summary>
@@ -181,7 +173,7 @@ namespace Microsoft.ML.Probabilistic.Tests
         [Fact]
         public void MissingOperatorTest2()
         {
-            try
+            Assert.Throws<CompilationFailedException>(() =>
             {
                 InferenceEngine engine = new InferenceEngine();
                 Variable<double> V = Variable.GaussianFromMeanAndVariance(0, 1);
@@ -189,15 +181,7 @@ namespace Microsoft.ML.Probabilistic.Tests
                 Gaussian marginalX = engine.Infer<Gaussian>(X); // fails
                 Console.WriteLine("Posterior X = " + marginalX);
                 Assert.True(false, "Missing operator exception not thrown");
-            }
-            catch (NotSupportedException ex)
-            {
-                Console.WriteLine(ex);
-            }
-            catch (CompilationFailedException ex)
-            {
-                Console.WriteLine(ex);
-            }
+            });
         }
 
         [Fact]
@@ -481,9 +465,13 @@ namespace Microsoft.ML.Probabilistic.Tests
         public void DeepJaggedArrayExample()
         {
             var a = Variable.Array<Vector>(new Range(1));
-            var b = Variable.Array<VariableArray<Vector>, Vector[][]>(a, new Range(2));
-            var c = Variable.Array<VariableArray<VariableArray<Vector>, Vector[][]>, Vector[][][]>(b, new Range(3));
-            var d = Variable.Array<VariableArray<VariableArray<VariableArray<Vector>, Vector[][]>, Vector[][][]>, Vector[][][][]>(c, new Range(4));
+            //var b = Variable.Array<VariableArray<Vector>, Vector[][]>(a, new Range(2));
+            //var b = Variable<Vector[]>.Array(a, new Range(2));
+            var b = Variable.Array(a, new Range(2));
+            //var c = Variable.Array<VariableArray<VariableArray<Vector>, Vector[][]>, Vector[][][]>(b, new Range(3));
+            var c = Variable.Array(b, new Range(3));
+            //var d = Variable.Array<VariableArray<VariableArray<VariableArray<Vector>, Vector[][]>, Vector[][][]>, Vector[][][][]>(c, new Range(4));
+            var d = Variable.Array(c, new Range(4));
         }
 
         [Fact]
@@ -1016,7 +1004,7 @@ namespace Microsoft.ML.Probabilistic.Tests
             // defining whole array at once.
             // passing whole array to method.
             // passing given array to method.
-            items = Factor.GetItems(array, arrayGiven);
+            items = Collection.GetItems(array, arrayGiven);
             double[,] array2D = new double[arrayLength, scalarGiven];
             for (int j = 0; j < arrayLength; j++)
             {
@@ -1486,17 +1474,16 @@ namespace Microsoft.ML.Probabilistic.Tests
         internal void XmlSerializationExample()
         {
             Dirichlet d = new Dirichlet(3.0, 1.0, 2.0);
+            string fileName = "temp.xml";
             DataContractSerializer serializer = new DataContractSerializer(typeof(Dirichlet), new DataContractSerializerSettings { DataContractResolver = new InferDataContractResolver() });
             // write to disk
-            using (FileStream stream = new FileStream("temp.xml", FileMode.Create))
+            using (XmlDictionaryWriter writer = XmlDictionaryWriter.CreateTextWriter(new FileStream(fileName, FileMode.Create)))
             {
-                XmlDictionaryWriter writer = XmlDictionaryWriter.CreateTextWriter(stream);
                 serializer.WriteObject(writer, d);
             }
             // read from disk
-            using (FileStream stream = new FileStream("temp.xml", FileMode.Open))
+            using (XmlDictionaryReader reader = XmlDictionaryReader.CreateTextReader(new FileStream(fileName, FileMode.Open), new XmlDictionaryReaderQuotas()))
             {
-                XmlDictionaryReader reader = XmlDictionaryReader.CreateTextReader(stream, new XmlDictionaryReaderQuotas());
                 Dirichlet d2 = (Dirichlet)serializer.ReadObject(reader);
                 Console.WriteLine(d2);
             }

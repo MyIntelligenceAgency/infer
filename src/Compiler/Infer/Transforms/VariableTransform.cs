@@ -32,17 +32,17 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
         /// <summary>
         /// All variables that have been assigned to so far
         /// </summary>
-        private Set<IVariableDeclaration> variablesAssigned = new Set<IVariableDeclaration>(new IdentityComparer<IVariableDeclaration>());
+        private Set<IVariableDeclaration> variablesAssigned = new Set<IVariableDeclaration>(ReferenceEqualityComparer<IVariableDeclaration>.Instance);
 
-        private Set<IVariableDeclaration> variablesLackingVariableFactor = new Set<IVariableDeclaration>(new IdentityComparer<IVariableDeclaration>());
+        private Set<IVariableDeclaration> variablesLackingVariableFactor = new Set<IVariableDeclaration>(ReferenceEqualityComparer<IVariableDeclaration>.Instance);
 
         private Set<IExpression> targetsOfCurrentAssignment;
 
         private Dictionary<object, IVariableDeclaration> useOfVariable =
-            new Dictionary<object, IVariableDeclaration>(new IdentityComparer<object>());
+            new Dictionary<object, IVariableDeclaration>(ReferenceEqualityComparer<object>.Instance);
 
         private Dictionary<object, IVariableDeclaration> marginalOfVariable =
-            new Dictionary<object, IVariableDeclaration>(new IdentityComparer<object>());
+            new Dictionary<object, IVariableDeclaration>(ReferenceEqualityComparer<object>.Instance);
 
         private IAlgorithm algorithmDefault;
         private VariableAnalysisTransform analysis;
@@ -81,7 +81,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
         protected override IExpression ConvertAssign(IAssignExpression iae)
         {
             var oldTargets = targetsOfCurrentAssignment;
-            targetsOfCurrentAssignment = new Set<IExpression>(new IdentityComparer<IExpression>());
+            targetsOfCurrentAssignment = new Set<IExpression>(ReferenceEqualityComparer<IExpression>.Instance);
             iae = (IAssignExpression)base.ConvertAssign(iae);
             targetsOfCurrentAssignment.Add(iae.Target);
             IExpression rhs = iae.Expression;
@@ -186,7 +186,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
             if (rhs is IMethodInvokeExpression)
             {
                 IMethodInvokeExpression imie = (IMethodInvokeExpression)rhs;
-                if (Recognizer.IsStaticGenericMethod(imie, new Func<PlaceHolder, PlaceHolder>(Factor.Copy)) && ancIndex < context.InputStack.Count - 2)
+                if (Recognizer.IsStaticGenericMethod(imie, new Func<PlaceHolder, PlaceHolder>(Clone.Copy)) && ancIndex < context.InputStack.Count - 2)
                 {
                     IExpression arg = imie.Arguments[0];
                     IVariableDeclaration ivd2 = Recognizer.GetVariableDeclaration(arg);
@@ -220,7 +220,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
                             context.OutputAttributes.Remove<InitialiseTo>(vi.declaration);
 
                             IExpression copyExpr = Builder.StaticGenericMethod(
-                                new Func<PlaceHolder, PlaceHolder>(Factor.Copy), genArgs, useExpr2);
+                                new Func<PlaceHolder, PlaceHolder>(Clone.Copy), genArgs, useExpr2);
                             var copyStmt = Builder.AssignStmt(useExpr, copyExpr);
                             context.AddStatementAfterCurrent(copyStmt);
                         }
@@ -241,7 +241,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
             {
                 Delegate d = algorithm.GetVariableFactor(isDerived, it != null);
                 if (isPointEstimate)
-                    d = new Models.FuncOut<PlaceHolder, PlaceHolder, PlaceHolder>(Factor.VariablePoint);
+                    d = new Models.FuncOut<PlaceHolder, PlaceHolder, PlaceHolder>(Clone.VariablePoint);
                 if (it == null)
                 {
                     variableFactorExpr = Builder.StaticGenericMethod(d, genArgs, defExpr, marginalExpr);
@@ -334,7 +334,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
                     targetsOfCurrentAssignment.Add(iaoe.Expression);
                 }
             }
-            if (Recognizer.IsStaticGenericMethod(imie, new Func<IList<PlaceHolder>, int[][], PlaceHolder[][]>(Factor.JaggedSubarray)))
+            if (Recognizer.IsStaticGenericMethod(imie, new Func<IReadOnlyList<PlaceHolder>, int[][], PlaceHolder[][]>(Collection.JaggedSubarray)))
             {
                 IExpression arrayExpr = imie.Arguments[0];
                 IVariableDeclaration ivd = Recognizer.GetVariableDeclaration(imie.Arguments[0]);
@@ -354,7 +354,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
                     // none of the arguments should need to be transformed
                     IExpression indicesExpr = imie.Arguments[1];
                     IExpression marginalExpr = Builder.VarRefExpr(marginalOfVariable[ivd]);
-                    IMethodInvokeExpression mie = Builder.StaticGenericMethod(new Models.FuncOut<IList<PlaceHolder>, int[][], IList<PlaceHolder>, PlaceHolder[][]>(Factor.JaggedSubarrayWithMarginal),
+                    IMethodInvokeExpression mie = Builder.StaticGenericMethod(new Models.FuncOut<IReadOnlyList<PlaceHolder>, int[][], IReadOnlyList<PlaceHolder>, PlaceHolder[][]>(Collection.JaggedSubarrayWithMarginal),
                         new Type[] { Utilities.Util.GetElementType(arrayExpr.GetExpressionType()) },
                         arrayExpr, indicesExpr, marginalExpr);
                     return mie;
@@ -435,7 +435,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
     /// </summary>
     internal class VariableAnalysisTransform : ShallowCopyTransform
     {
-        public Set<IVariableDeclaration> variablesExcludingVariableFactor = new Set<IVariableDeclaration>(new IdentityComparer<IVariableDeclaration>());
+        public Set<IVariableDeclaration> variablesExcludingVariableFactor = new Set<IVariableDeclaration>(ReferenceEqualityComparer<IVariableDeclaration>.Instance);
         bool useJaggedSubarrayWithMarginal;
 
         public override string Name
@@ -453,7 +453,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
 
         protected override IExpression ConvertMethodInvoke(IMethodInvokeExpression imie)
         {
-            if (useJaggedSubarrayWithMarginal && Recognizer.IsStaticGenericMethod(imie, new Func<IList<PlaceHolder>, int[][], PlaceHolder[][]>(Factor.JaggedSubarray)))
+            if (useJaggedSubarrayWithMarginal && Recognizer.IsStaticGenericMethod(imie, new Func<IReadOnlyList<PlaceHolder>, int[][], PlaceHolder[][]>(Collection.JaggedSubarray)))
             {
                 IExpression arrayExpr = imie.Arguments[0];
                 IVariableDeclaration ivd = Recognizer.GetVariableDeclaration(arrayExpr);
