@@ -30,6 +30,7 @@ using Microsoft.ML.Probabilistic.Tests.CodeCompilerTests;
 #pragma warning disable 162
 #endif
 
+[assembly: AssemblyVersion("1.0.0.0")]
 namespace TestApp
 {
     internal static class Program
@@ -47,7 +48,7 @@ namespace TestApp
             Trace.Listeners.Add(new TextWriterTraceListener(Console.Out));
             var logWriter = new StreamWriter("debug.txt");
             Trace.Listeners.Add(new TextWriterTraceListener(logWriter));
-#if NETFRAMEWORK
+#if NETFRAMEWORK || WINDOWS
             InferenceEngine.Visualizer = new WindowsVisualizer();
 #endif
             Debug.AutoFlush = true;
@@ -61,8 +62,8 @@ namespace TestApp
             //InferenceEngine.DefaultEngine.Compiler.OptimiseInferenceCode = false;
             //InferenceEngine.DefaultEngine.Compiler.FreeMemory = false;
             //InferenceEngine.DefaultEngine.Compiler.ReturnCopies = false;
-            //InferenceEngine.DefaultEngine.Compiler.UnrollLoops = true;
-            //InferenceEngine.DefaultEngine.Compiler.UseParallelForLoops = true;
+            //InferenceEngine.DefaultEngine.Compiler.UnrollLoops = false;
+            //InferenceEngine.DefaultEngine.Compiler.UseParallelForLoops = false;
             //InferenceEngine.DefaultEngine.ShowTimings = true;
             //InferenceEngine.DefaultEngine.ShowProgress = false;
             //InferenceEngine.DefaultEngine.ShowFactorGraph = true;
@@ -83,11 +84,13 @@ namespace TestApp
             Stopwatch watch = new Stopwatch();
             watch.Start();
 
-            if (false)
+
+            bool runAllTests = false;
+            if (runAllTests)
             {
                 // Run all tests (need to run in 64-bit else OutOfMemory due to loading many DLLs)
                 // This is useful when looking for failures due to certain compiler options.
-                Console.WriteLine(StringUtil.VerboseToString(TestUtils.GetTestResultPaths()));
+                //Console.WriteLine(StringUtil.VerboseToString(TestUtils.GetTestResultPaths()));
                 //string path = @"C:\Users\minka\Depots\mlp\infernet\Infer2\TestResults\minka_MSRC-MINKA3 2013-04-11 14_36_55.trx";
                 InferenceEngine.DefaultEngine.Compiler.RecommendedQuality = QualityBand.Preview;
                 InferenceEngine.DefaultEngine.Compiler.GenerateInMemory = true;
@@ -100,14 +103,17 @@ namespace TestApp
                 //}
                 //TestUtils.CheckTransformNames();
             }
-            //InferenceEngine.ShowFactorManager(true);
+            bool showFactorManager = false;
+            if (showFactorManager)
+            {
+                InferenceEngine.ShowFactorManager(true);
+            }
 #if NETFRAMEWORK
             logWriter.Dispose();
 #endif
             watch.Stop();
             Console.WriteLine("elapsed time = {0}ms", watch.ElapsedMilliseconds);
         }
-
     }
 }
 

@@ -483,21 +483,10 @@ namespace Microsoft.ML.Probabilistic.Models
                 else
                 {
                     // constant
-                    if (!IsDefined)
+                    if (Inline)
                     {
                         HasObservedValue hov = this as HasObservedValue;
-                        Type type;
-                        if (hov.ObservedValue is null)
-                        {
-                            Type face = GetType().GetInterface(typeof(IModelExpression<>).Name, false);
-                            Type[] typeArgs = face.GetGenericArguments();
-                            type = typeArgs[0];
-                        }
-                        else
-                        {
-                            type = hov.ObservedValue.GetType();
-                        }
-                        if (Quoter.ShouldInlineType(type)) return Quoter.Quote(hov.ObservedValue);
+                        return Quoter.Quote(hov.ObservedValue);
                     }
                     return Builder.VarRefExpr((IVariableDeclaration)GetDeclaration());
                 }
@@ -1524,7 +1513,7 @@ namespace Microsoft.ML.Probabilistic.Models
                 }
             }
             object distConst = Microsoft.ML.Probabilistic.Compiler.Reflection.Invoker.InvokeStatic(typeof(Variable), "Constant", dist);
-            return Variable<T>.FactorUntyped(typeof(Factor).GetMethod("Random").MakeGenericMethod(typeof(T)), (Variable)distConst);
+            return Variable<T>.FactorUntyped(new Func<Sampleable<T>, T>(Factor.Random<T>).Method, (Variable)distConst);
         }
 
         /// <summary>
@@ -2461,7 +2450,7 @@ namespace Microsoft.ML.Probabilistic.Models
             if (probs.Length == 0) return DiscreteUniform(valueRange);
             else
             {
-                if (valueRange.SizeAsInt != probs.Length) throw new ArgumentException("probs.Length (" + probs.Length + ") != range.Size (" + valueRange.SizeAsInt + ")");
+                if (valueRange.SizeAsInt != probs.Length) throw new ArgumentException($"probs.Length ({probs.Length}) != range.Size ({valueRange.SizeAsInt})");
                 return Variable<int>.Random(Constant(new Discrete(probs)))
                                     .Attrib(new ValueRange(valueRange));
             }
@@ -2492,6 +2481,7 @@ namespace Microsoft.ML.Probabilistic.Models
         /// <returns>Returns a random variable that is statistically defined by the specified Discrete distribution.</returns>
         public static Variable<int> Discrete(Range valueRange, Vector v)
         {
+            if (valueRange.SizeAsInt != v.Count) throw new ArgumentException($"Vector length ({v.Count}) != range.Size ({valueRange.SizeAsInt})");
             var rv = Discrete(v.ToArray()).Attrib(new ValueRange(valueRange));
             if (!v.Sparsity.IsDense)
                 rv.SetSparsity(v.Sparsity);
@@ -2881,12 +2871,16 @@ namespace Microsoft.ML.Probabilistic.Models
         /// Creates a Dirichlet-distributed random variable with the dimensionality specified by
         /// a <c>Range</c> object and a specified set of pseudo-counts.
         /// </summary>
-        /// <param name="valueRange">A <c>Range</c> object that is initialized to the  Dirichlet
+        /// <param name="valueRange">A <c>Range</c> object that is initialized to the Dirichlet
         /// distribution's dimensionality.</param>
         /// <param name="u">An array containing the pseudo-counts.</param>
         /// <returns>Returns a Dirichlet-distributed random variable of dimension <paramref name="u"/></returns>
         public static Variable<Vector> Dirichlet(Range valueRange, double[] u)
         {
+            if (valueRange.SizeAsInt != u.Length)
+            {
+                throw new ArgumentException($"The range size ({valueRange.SizeAsInt}) does not match the array length ({u.Length})");
+            }
             return Dirichlet(u).Attrib(new ValueRange(valueRange));
         }
 
@@ -2933,6 +2927,10 @@ namespace Microsoft.ML.Probabilistic.Models
         /// by <paramref name="v"/>.</returns>
         public static Variable<Vector> Dirichlet(Range valueRange, Vector v)
         {
+            if (valueRange.SizeAsInt != v.Count)
+            {
+                throw new ArgumentException($"The range size ({valueRange.SizeAsInt}) does not match the vector length ({v.Count})");
+            }
             return Dirichlet(v).Attrib(new ValueRange(valueRange));
         }
 
@@ -3466,6 +3464,17 @@ namespace Microsoft.ML.Probabilistic.Models
         }
 
         /// <summary>
+        /// Returns an int variable which is the maximum of two int variables
+        /// </summary>
+        /// <param name="a">The first variable</param>
+        /// <param name="b">The second variable</param>
+        /// <returns>A new variable</returns>
+        public static Variable<int> Max(Variable<int> a, Variable<int> b)
+        {
+            return Variable<int>.Factor(System.Math.Max, a, b);
+        }
+
+        /// <summary>
         /// Returns a double variable which is the minimum of two double variables
         /// </summary>
         /// <param name="a">The first variable</param>
@@ -3801,6 +3810,24 @@ namespace Microsoft.ML.Probabilistic.Models
             second = Variable.Array<T>(range);
             CreateVariableArray(second, array);
             first[range] = Variable<T>.Factor(LowPriority.SequentialCopy<T>, array[range], second[range]);
+            return first;
+        }
+
+        /// <summary>
+        /// Creates two copies of the argument, that will be updated in order during inference.
+        /// </summary>
+        /// <typeparam name="T">The domain type of an array element.</typeparam>
+        /// <param name="array">Array to copy.</param>
+        /// <param name="second">The second copy.</param>
+        /// <returns>The first copy.</returns>
+        public static VariableArray<T> ParallelCopy<T>(VariableArray<T> array, out VariableArray<T> second)
+        {
+            var range = array.Range;
+            var first = Variable.Array<T>(range);
+            CreateVariableArray(first, array);
+            second = Variable.Array<T>(range);
+            CreateVariableArray(second, array);
+            first[range] = Variable<T>.Factor(LowPriority.ParallelCopy<T>, array[range], second[range]);
             return first;
         }
 
@@ -4637,7 +4664,7 @@ namespace Microsoft.ML.Probabilistic.Models
         /// </remarks>
         public static Variable<string> StringCapitalized(Variable<int> minLength, Variable<int> maxLength = null)
         {
-            return ReferenceEquals(maxLength, null)
+            return maxLength is null
                 ? Variable<string>.Factor(Factor.StringCapitalized, minLength)
                 : Variable<string>.Factor(Factor.StringCapitalized, minLength, maxLength);
         }
@@ -4700,7 +4727,7 @@ namespace Microsoft.ML.Probabilistic.Models
         /// </remarks>
         public static Variable<string> String(Variable<int> minLength, Variable<int> maxLength, Variable<DiscreteChar> allowedCharacters)
         {
-            return ReferenceEquals(maxLength, null)
+            return maxLength is null
                 ? Variable<string>.Factor(Factor.String, minLength, allowedCharacters)
                 : Variable<string>.Factor(Factor.String, minLength, maxLength, allowedCharacters);
         }
@@ -5211,7 +5238,6 @@ namespace Microsoft.ML.Probabilistic.Models
         /// <summary>
         /// Enumeration over supported operators.
         /// </summary>
-#pragma warning disable 1591
         public enum Operator
         {
             Plus,
@@ -5234,7 +5260,6 @@ namespace Microsoft.ML.Probabilistic.Models
             GreaterThanOrEqual,
             LessThanOrEqual
         };
-#pragma warning restore 1591
     }
 
     /// <summary>
@@ -6002,7 +6027,6 @@ namespace Microsoft.ML.Probabilistic.Models
         public static Variable<T> Random<TDist>(Variable<TDist> dist) where TDist : IDistribution<T> //, Sampleable<T>
         {
             return FactorUntyped(new Func<Sampleable<T>, T>(Factors.Factor.Random<T>).Method, (Variable)dist);
-            //return FactorUntyped(typeof(Factor).GetMethod("Random").MakeGenericMethod(typeof(T)), (Variable)dist);
         }
 
         /// <summary>
@@ -6471,11 +6495,11 @@ namespace Microsoft.ML.Probabilistic.Models
                 {
                     diff = null;
                 }
-                if ((object)diff == null)
+                if (diff is null)
                 {
                     diff = OperatorFactor<T>(Operator.Minus, a, b);
                 }
-                if ((object)diff != null)
+                if (diff is object)
                 {
                     return IsPositive((Variable<double>)(Variable)diff);
                 }
@@ -6486,7 +6510,7 @@ namespace Microsoft.ML.Probabilistic.Models
 
         private static Variable<bool> NotOrNull(Variable<bool> Variable)
         {
-            return ((object)Variable == null) ? null : !Variable;
+            return (Variable is null) ? null : !Variable;
         }
 
         /// <summary>
@@ -6672,7 +6696,7 @@ namespace Microsoft.ML.Probabilistic.Models
         public static Variable<T> operator -(Variable<T> a)
         {
             Variable<T> f = OperatorFactor<T>(Operator.Negative, a);
-            if ((object)f != null) return f;
+            if (f is object) return f;
             else if (a is Variable<double>)
             {
                 Variable<T> zero = (Variable<T>)(object)Constant(0.0);

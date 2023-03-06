@@ -3786,18 +3786,26 @@ rr = mpf('-0.99999824265582826');
         /// <returns></returns>
         public static double LogSumExp(IEnumerable<double> list)
         {
-            double max = Max(list);
-            IEnumerator<double> iter = list.GetEnumerator();
-            if (!iter.MoveNext() || Double.IsNegativeInfinity(max))
+            IReadOnlyCollection<double> items = list as IReadOnlyCollection<double> ?? list.ToReadOnlyList();
+
+            if (items.Count == 0)
+                return Double.NegativeInfinity; // log(0)
+
+            double max = Max(items);
+            if (Double.IsNegativeInfinity(max))
                 return Double.NegativeInfinity; // log(0)
             if (Double.IsPositiveInfinity(max))
                 return Double.PositiveInfinity;
+
             // at this point, max is finite
+            IEnumerator<double> iter = items.GetEnumerator();
+            iter.MoveNext();
             double Z = Math.Exp(iter.Current - max);
             while (iter.MoveNext())
             {
                 Z += Math.Exp(iter.Current - max);
             }
+
             return Math.Log(Z) + max;
         }
 
@@ -3808,11 +3816,17 @@ rr = mpf('-0.99999824265582826');
         /// <returns></returns>
         public static double LogSumExpSparse(IEnumerable<double> list)
         {
-            if (!(list is ISparseEnumerable<double>))
-                return LogSumExp(list);
-            double max = list.EnumerableReduce(double.NegativeInfinity,
+            IReadOnlyCollection<double> items = list as IReadOnlyCollection<double> ?? list.ToReadOnlyList();
+
+            if (items.Count == 0)
+                return Double.NegativeInfinity; // log(0)
+
+            if (!(items is ISparseEnumerable<double>))
+                return LogSumExp(items);
+
+            double max = items.EnumerableReduce(double.NegativeInfinity,
                                                (res, i) => Math.Max(res, i), (res, i, count) => Math.Max(res, i));
-            var iter = (list as ISparseEnumerable<double>).GetSparseEnumerator();
+            var iter = (items as ISparseEnumerable<double>).GetSparseEnumerator();
             if ((!iter.MoveNext() && iter.CommonValueCount == 0) || Double.IsNegativeInfinity(max))
                 return Double.NegativeInfinity; // log(0)
             if (Double.IsPositiveInfinity(max))
@@ -4276,7 +4290,7 @@ rr = mpf('-0.99999824265582826');
         {
             IEnumerator<double> iter = list.GetEnumerator();
             if (!iter.MoveNext())
-                return Double.NaN;
+                throw new InvalidOperationException("Sequence contains no elements");
             double Z = iter.Current;
             while (iter.MoveNext())
             {
@@ -4294,7 +4308,7 @@ rr = mpf('-0.99999824265582826');
         {
             IEnumerator<double> iter = list.GetEnumerator();
             if (!iter.MoveNext())
-                return Double.NaN;
+                throw new InvalidOperationException("Sequence contains no elements");
             double Z = iter.Current;
             while (iter.MoveNext())
             {
@@ -4387,7 +4401,7 @@ rr = mpf('-0.99999824265582826');
         public static double Median(double[] array, int start, int length)
         {
             if (length <= 0)
-                return Double.NaN;
+                throw new InvalidOperationException("Sequence contains no elements");
             // this can be done in O(n) time, but here we take a slower shortcut.
             // Array.Sort does not sort NaNs reliably, so we must extract them first.
             double[] a = RemoveNaNs(array, start, length);
@@ -4824,6 +4838,7 @@ rr = mpf('-0.99999824265582826');
         /// <returns></returns>
         public static double WeightedAverage(double weight1, double value1, double weight2, double value2)
         {
+            const double ScaleBM1024 = 5.5626846462680035E-309; // Math.ScaleB(1,-1024)
             if (weight1 < weight2)
             {
                 return WeightedAverage(weight2, value2, weight1, value1);
@@ -4850,21 +4865,30 @@ rr = mpf('-0.99999824265582826');
                 // Instead of scaling by 1/weight2, choose scale so that scale*(weight1+weight2) <= double.MaxValue.
                 // We know that (weight1+weight2) == weight1
                 // weight2 < 1
-                double scale = double.MaxValue / weight1; // scale >= 1 but scale*weight2 < 1
-                //result = (scale * weight1 * value1 + scale * weight2 * value2) / (scale * weight1 + scale * weight2);
-                double scaleWeight2Value2 = scale * weight2 * value2; // cannot overflow
-                result = (double.MaxValue * value1 + scaleWeight2Value2) / double.MaxValue;
-                if (double.IsNaN(result) || double.IsInfinity(result))
+                const double nextBelowOne = double.MaxValue * ScaleBM1024; // nextBelowOne < 1
+                if (weight1 < 1)
                 {
-                    // Overflow happened.  Scale down to avoid overflow.
-                    // We scale by a power of 2 to ensure that the result is rounded the same way as above.
-                    // Otherwise, the function would not always be monotonic in value1 and value2.
-                    const double ScaleBM1024 = 5.5626846462680035E-309; // ScaleB(1,-1024)
-                    const double nextBelowOne = double.MaxValue * ScaleBM1024; // nextBelowOne < 1
-                    // IsInfinity(result) implies value1 > 1 so the first term cannot underflow.
-                    // This cannot overflow, because the second term's magnitude is less than 1.
-                    result = (nextBelowOne * value1 + scaleWeight2Value2 * ScaleBM1024) / nextBelowOne;
-                    if (double.IsNaN(result)) return value1 + value2;
+                    double scale = nextBelowOne / weight1; // scale >= 1 but scale*weight2 << 1
+                    double scaleWeight2Value2 = scale * weight2 * value2; // cannot overflow
+                    result = (nextBelowOne * value1 + scaleWeight2Value2) / nextBelowOne; // cannot overflow
+                }
+                else
+                {
+                    double scale = double.MaxValue / weight1; // scale >= 1 but scale*weight2 < 1
+                    // Below is equivalent to:
+                    // result = (scale * weight1 * value1 + scale * weight2 * value2) / (scale * weight1 + scale * weight2);
+                    double scaleWeight2Value2 = scale * weight2 * value2; // cannot overflow
+                    result = (double.MaxValue * value1 + scaleWeight2Value2) / double.MaxValue;
+                    if (double.IsNaN(result) || double.IsInfinity(result))
+                    {
+                        // Overflow happened.  Scale down to avoid overflow.
+                        // We scale by a power of 2 to ensure that the result is rounded the same way as above.
+                        // Otherwise, the function would not always be monotonic in value1 and value2.
+                        // IsInfinity(result) implies value1 > 1 so the first term cannot underflow.
+                        // This cannot overflow, because the second term's magnitude is less than 1.
+                        result = (nextBelowOne * value1 + scaleWeight2Value2 * ScaleBM1024) / nextBelowOne;
+                        if (double.IsNaN(result)) return value1 + value2;
+                    }
                 }
             }
             else
@@ -4879,27 +4903,11 @@ rr = mpf('-0.99999824265582826');
                 if (double.IsNaN(result) || double.IsInfinity(result))
                 {
                     // Overflow happened.  Scale down to avoid overflow.
-                    // 0 <= weight2/weight1 <= 1
-                    // This case cannot overflow but can underflow.
-                    // It is not clear whether this result will be rounded the same way as above,
-                    // so it is not clear that this code ensures monotonicity.
-                    double ratio2 = weight2 / weight1;
-                    result = (0.5 * value1 + 0.5 * ratio2 * value2) / (0.5 + 0.5 * ratio2);
-                    if (double.IsNaN(result))
-                    {
-                        // a/b returns NaN in 4 cases:
-                        // 1. a=b=0
-                        // 2. abs(a)=abs(b)=infinity
-                        // 3. a is NaN
-                        // 4. b is NaN
-                        // (weight2/weight1) cannot be NaN since none of these cases can happen.
-                        // Therefore IsNaN(result) implies IsNaN(numerator).
-                        // IsNaN(numerator) happens in 2 ways:
-                        // 1. abs(value1)=inf and (weight2 / weight1) * value2 = -value1.  This implies abs(value2)=-value1.
-                        // 2. (weight2 / weight1) * value2 is NaN.  This implies (weight2/weight1)=0 and abs(value2)=inf.
-                        // In both cases, the weights are irrelevant since at least one value is infinite.
-                        return value1 + value2;
-                    }
+                    // We scale by a power of 2 to ensure that the result is rounded the same way as above.
+                    // ratio * ScaleBM1024 < 1 therefore ratio * ScaleBM1024 * value1 cannot overflow.
+                    // value2 * ScaleBM1024 < 1 therefore the sum cannot overflow.
+                    // Both terms in the denominator are < 1 therefore the denominator cannot overflow.
+                    result = (ratio * ScaleBM1024 * value1 + value2 * ScaleBM1024) / (ratio * ScaleBM1024 + ScaleBM1024);
                 }
             }
             result = Math.Min(result, Math.Max(value1, value2));

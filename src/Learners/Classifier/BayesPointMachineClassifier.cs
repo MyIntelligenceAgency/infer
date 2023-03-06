@@ -14,6 +14,7 @@ namespace Microsoft.ML.Probabilistic.Learners
     using Microsoft.ML.Probabilistic.Learners.BayesPointMachineClassifierInternal;
     using Microsoft.ML.Probabilistic.Learners.Mappings;
     using Microsoft.ML.Probabilistic.Math;
+    using Microsoft.ML.Probabilistic.Serialization;
 
     /// <summary>
     /// The Bayes point machine classifier factory.
@@ -291,20 +292,20 @@ namespace Microsoft.ML.Probabilistic.Learners
 
         #endregion
 
-        #region Custom binary deserialization
+        #region Custom deserialization
 
         /// <summary>
-        /// Deserializes a binary Bayes point machine classifier from a reader to a binary stream and a native data format mapping.
+        /// Deserializes a binary Bayes point machine classifier from a reader to a stream and a native data format mapping.
         /// </summary>
         /// <typeparam name="TInstanceSource">The type of a source of instances.</typeparam>
         /// <typeparam name="TInstance">The type of an instance.</typeparam>
         /// <typeparam name="TLabelSource">The type of a source of labels.</typeparam>
-        /// <param name="reader">The reader to a binary stream of a serialized binary Bayes point machine classifier.</param>
+        /// <param name="reader">The reader to a stream of a serialized binary Bayes point machine classifier.</param>
         /// <param name="mapping">The mapping used for accessing data in the native format.</param>
         /// <returns>The binary Bayes point machine classifier instance.</returns>
         public static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, bool, Bernoulli, BayesPointMachineClassifierTrainingSettings, BinaryBayesPointMachineClassifierPredictionSettings<bool>>
             LoadBackwardCompatibleBinaryClassifier<TInstanceSource, TInstance, TLabelSource>(
-                BinaryReader reader, IBayesPointMachineClassifierMapping<TInstanceSource, TInstance, TLabelSource, bool> mapping)
+                IReader reader, IBayesPointMachineClassifierMapping<TInstanceSource, TInstance, TLabelSource, bool> mapping)
         {
             if (reader == null)
             {
@@ -317,30 +318,6 @@ namespace Microsoft.ML.Probabilistic.Learners
             }
 
             return new CompoundBinaryNativeDataFormatBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource>(reader, mapping);
-        }
-
-        /// <summary>
-        /// Deserializes a binary Bayes point machine classifier from a binary stream and a native data format mapping.
-        /// </summary>
-        /// <typeparam name="TInstanceSource">The type of a source of instances.</typeparam>
-        /// <typeparam name="TInstance">The type of an instance.</typeparam>
-        /// <typeparam name="TLabelSource">The type of a source of labels.</typeparam>
-        /// <param name="stream">The binary stream of a serialized binary Bayes point machine classifier.</param>
-        /// <param name="mapping">The mapping used for accessing data in the native format.</param>
-        /// <returns>The binary Bayes point machine classifier instance.</returns>
-        public static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, bool, Bernoulli, BayesPointMachineClassifierTrainingSettings, BinaryBayesPointMachineClassifierPredictionSettings<bool>>
-            LoadBackwardCompatibleBinaryClassifier<TInstanceSource, TInstance, TLabelSource>(
-                Stream stream, IBayesPointMachineClassifierMapping<TInstanceSource, TInstance, TLabelSource, bool> mapping)
-        {
-            if (stream == null)
-            {
-                throw new ArgumentNullException(nameof(stream));
-            }
-
-            using (var reader = new BinaryReader(stream, Encoding.UTF8, true))
-            {
-                return LoadBackwardCompatibleBinaryClassifier(reader, mapping);
-            }
         }
 
         /// <summary>
@@ -361,24 +338,24 @@ namespace Microsoft.ML.Probabilistic.Learners
                 throw new ArgumentNullException(nameof(fileName));
             }
 
-            using (Stream stream = File.Open(fileName, FileMode.Open))
-            { 
-                return LoadBackwardCompatibleBinaryClassifier(stream, mapping);
-            }
+            return WithReader(fileName, reader =>
+            {
+                return LoadBackwardCompatibleBinaryClassifier(reader, mapping);
+            });
         }
 
         /// <summary>
-        /// Deserializes a multi-class Bayes point machine classifier from a reader to a binary stream and a native data format mapping.
+        /// Deserializes a multi-class Bayes point machine classifier from a reader to a stream and a native data format mapping.
         /// </summary>
         /// <typeparam name="TInstanceSource">The type of a source of instances.</typeparam>
         /// <typeparam name="TInstance">The type of an instance.</typeparam>
         /// <typeparam name="TLabelSource">The type of a source of labels.</typeparam>
-        /// <param name="reader">The reader to a binary stream of a serialized multi-class Bayes point machine classifier.</param>
+        /// <param name="reader">The reader to a stream of a serialized multi-class Bayes point machine classifier.</param>
         /// <param name="mapping">The mapping used for accessing data in the native format.</param>
         /// <returns>The multi-class Bayes point machine classifier instance.</returns>
         public static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, int, Discrete, BayesPointMachineClassifierTrainingSettings, MulticlassBayesPointMachineClassifierPredictionSettings<int>>
             LoadBackwardCompatibleMulticlassClassifier<TInstanceSource, TInstance, TLabelSource>(
-                BinaryReader reader, IBayesPointMachineClassifierMapping<TInstanceSource, TInstance, TLabelSource, int> mapping)
+                IReader reader, IBayesPointMachineClassifierMapping<TInstanceSource, TInstance, TLabelSource, int> mapping)
         {
             if (reader == null)
             {
@@ -391,30 +368,6 @@ namespace Microsoft.ML.Probabilistic.Learners
             }
 
             return new CompoundMulticlassNativeDataFormatBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource>(reader, mapping);
-        }
-
-        /// <summary>
-        /// Deserializes a multi-class Bayes point machine classifier from a binary stream and a native data format mapping.
-        /// </summary>
-        /// <typeparam name="TInstanceSource">The type of a source of instances.</typeparam>
-        /// <typeparam name="TInstance">The type of an instance.</typeparam>
-        /// <typeparam name="TLabelSource">The type of a source of labels.</typeparam>
-        /// <param name="stream">The binary stream of a serialized multi-class Bayes point machine classifier.</param>
-        /// <param name="mapping">The mapping used for accessing data in the native format.</param>
-        /// <returns>The multi-class Bayes point machine classifier instance.</returns>
-        public static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, int, Discrete, BayesPointMachineClassifierTrainingSettings, MulticlassBayesPointMachineClassifierPredictionSettings<int>>
-            LoadBackwardCompatibleMulticlassClassifier<TInstanceSource, TInstance, TLabelSource>(
-                Stream stream, IBayesPointMachineClassifierMapping<TInstanceSource, TInstance, TLabelSource, int> mapping)
-        {
-            if (stream == null)
-            {
-                throw new ArgumentNullException(nameof(stream));
-            }
-
-            using (var reader = new BinaryReader(stream, Encoding.UTF8, true))
-            {
-                return LoadBackwardCompatibleMulticlassClassifier(reader, mapping);
-            }
         }
 
         /// <summary>
@@ -435,25 +388,25 @@ namespace Microsoft.ML.Probabilistic.Learners
                 throw new ArgumentNullException(nameof(fileName));
             }
 
-            using (Stream stream = File.Open(fileName, FileMode.Open))
-            { 
-                return LoadBackwardCompatibleMulticlassClassifier(stream, mapping);
-            }
+            return WithReader(fileName, reader =>
+            {
+                return LoadBackwardCompatibleMulticlassClassifier(reader, mapping);
+            });
         }
 
         /// <summary>
-        /// Deserializes a binary Bayes point machine classifier from a reader to a binary stream and a standard data format mapping.
+        /// Deserializes a binary Bayes point machine classifier from a reader to a stream and a standard data format mapping.
         /// </summary>
         /// <typeparam name="TInstanceSource">The type of a source of instances.</typeparam>
         /// <typeparam name="TInstance">The type of an instance.</typeparam>
         /// <typeparam name="TLabelSource">The type of a source of labels.</typeparam>
         /// <typeparam name="TLabel">The type of a label.</typeparam>
-        /// <param name="reader">The reader to a binary stream of a serialized binary Bayes point machine classifier.</param>
+        /// <param name="reader">The reader to a stream of a serialized binary Bayes point machine classifier.</param>
         /// <param name="mapping">The mapping used for accessing data in the standard format.</param>
         /// <returns>The binary Bayes point machine classifier instance.</returns>
         public static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, IDictionary<TLabel, double>, BayesPointMachineClassifierTrainingSettings, BinaryBayesPointMachineClassifierPredictionSettings<TLabel>>
             LoadBackwardCompatibleBinaryClassifier<TInstanceSource, TInstance, TLabelSource, TLabel>(
-                BinaryReader reader, IClassifierMapping<TInstanceSource, TInstance, TLabelSource, TLabel, Vector> mapping)
+                IReader reader, IClassifierMapping<TInstanceSource, TInstance, TLabelSource, TLabel, Vector> mapping)
         {
             if (reader == null)
             {
@@ -466,31 +419,6 @@ namespace Microsoft.ML.Probabilistic.Learners
             }
 
             return new CompoundBinaryStandardDataFormatBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel>(reader, mapping);
-        }
-
-        /// <summary>
-        /// Deserializes a binary Bayes point machine classifier from a binary stream and a standard data format mapping.
-        /// </summary>
-        /// <typeparam name="TInstanceSource">The type of a source of instances.</typeparam>
-        /// <typeparam name="TInstance">The type of an instance.</typeparam>
-        /// <typeparam name="TLabelSource">The type of a source of labels.</typeparam>
-        /// <typeparam name="TLabel">The type of a label.</typeparam>
-        /// <param name="stream">The binary stream of a serialized binary Bayes point machine classifier.</param>
-        /// <param name="mapping">The mapping used for accessing data in the standard format.</param>
-        /// <returns>The binary Bayes point machine classifier instance.</returns>
-        public static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, IDictionary<TLabel, double>, BayesPointMachineClassifierTrainingSettings, BinaryBayesPointMachineClassifierPredictionSettings<TLabel>>
-            LoadBackwardCompatibleBinaryClassifier<TInstanceSource, TInstance, TLabelSource, TLabel>(
-                Stream stream, IClassifierMapping<TInstanceSource, TInstance, TLabelSource, TLabel, Vector> mapping)
-        {
-            if (stream == null)
-            {
-                throw new ArgumentNullException(nameof(stream));
-            }
-
-            using (var reader = new BinaryReader(stream, Encoding.UTF8, true))
-            {
-                return LoadBackwardCompatibleBinaryClassifier(reader, mapping);
-            }
         }
 
         /// <summary>
@@ -512,25 +440,25 @@ namespace Microsoft.ML.Probabilistic.Learners
                 throw new ArgumentNullException(nameof(fileName));
             }
 
-            using (Stream stream = File.Open(fileName, FileMode.Open))
-            { 
-                return LoadBackwardCompatibleBinaryClassifier(stream, mapping);
-            }
+            return WithReader(fileName, reader =>
+            {
+                return LoadBackwardCompatibleBinaryClassifier(reader, mapping);
+            });
         }
 
         /// <summary>
-        /// Deserializes a multi-class Bayes point machine classifier from a reader to a binary stream and a standard data format mapping.
+        /// Deserializes a multi-class Bayes point machine classifier from a reader to a stream and a standard data format mapping.
         /// </summary>
         /// <typeparam name="TInstanceSource">The type of a source of instances.</typeparam>
         /// <typeparam name="TInstance">The type of an instance.</typeparam>
         /// <typeparam name="TLabelSource">The type of a source of labels.</typeparam>
         /// <typeparam name="TLabel">The type of a label.</typeparam>
-        /// <param name="reader">The reader to a binary stream of a serialized multi-class Bayes point machine classifier.</param>
+        /// <param name="reader">The reader to a stream of a serialized multi-class Bayes point machine classifier.</param>
         /// <param name="mapping">The mapping used for accessing data in the standard format.</param>
         /// <returns>The multi-class Bayes point machine classifier instance.</returns>
         public static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, IDictionary<TLabel, double>, BayesPointMachineClassifierTrainingSettings, MulticlassBayesPointMachineClassifierPredictionSettings<TLabel>>
             LoadBackwardCompatibleMulticlassClassifier<TInstanceSource, TInstance, TLabelSource, TLabel>(
-                BinaryReader reader, IClassifierMapping<TInstanceSource, TInstance, TLabelSource, TLabel, Vector> mapping)
+                IReader reader, IClassifierMapping<TInstanceSource, TInstance, TLabelSource, TLabel, Vector> mapping)
         {
             if (reader == null)
             {
@@ -543,31 +471,6 @@ namespace Microsoft.ML.Probabilistic.Learners
             }
 
             return new CompoundMulticlassStandardDataFormatBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel>(reader, mapping);
-        }
-
-        /// <summary>
-        /// Deserializes a multi-class Bayes point machine classifier from a binary stream and a standard data format mapping.
-        /// </summary>
-        /// <typeparam name="TInstanceSource">The type of a source of instances.</typeparam>
-        /// <typeparam name="TInstance">The type of an instance.</typeparam>
-        /// <typeparam name="TLabelSource">The type of a source of labels.</typeparam>
-        /// <typeparam name="TLabel">The type of a label.</typeparam>
-        /// <param name="stream">The binary stream of a serialized multi-class Bayes point machine classifier.</param>
-        /// <param name="mapping">The mapping used for accessing data in the standard format.</param>
-        /// <returns>The multi-class Bayes point machine classifier instance.</returns>
-        public static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, IDictionary<TLabel, double>, BayesPointMachineClassifierTrainingSettings, MulticlassBayesPointMachineClassifierPredictionSettings<TLabel>>
-            LoadBackwardCompatibleMulticlassClassifier<TInstanceSource, TInstance, TLabelSource, TLabel>(
-                Stream stream, IClassifierMapping<TInstanceSource, TInstance, TLabelSource, TLabel, Vector> mapping)
-        {
-            if (stream == null)
-            {
-                throw new ArgumentNullException(nameof(stream));
-            }
-
-            using (var reader = new BinaryReader(stream, Encoding.UTF8, true))
-            {
-                return LoadBackwardCompatibleMulticlassClassifier(reader, mapping);
-            }
         }
 
         /// <summary>
@@ -589,10 +492,10 @@ namespace Microsoft.ML.Probabilistic.Learners
                 throw new ArgumentNullException(nameof(fileName));
             }
 
-            using (Stream stream = File.Open(fileName, FileMode.Open))
-            { 
-                return LoadBackwardCompatibleMulticlassClassifier(stream, mapping);
-            }
+            return WithReader(fileName, reader =>
+            {
+                return LoadBackwardCompatibleMulticlassClassifier(reader, mapping);
+            });
         }
 
         #endregion
@@ -608,7 +511,7 @@ namespace Microsoft.ML.Probabilistic.Learners
         /// <typeparam name="TLabelSource">The type of a source of labels.</typeparam>
         /// <param name="mapping">The mapping used for accessing data in the native format.</param>
         /// <returns>The binary Bayes point machine classifier instance.</returns>
-        internal static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, bool, Bernoulli, GaussianBayesPointMachineClassifierTrainingSettings, BinaryBayesPointMachineClassifierPredictionSettings<bool>>
+        public static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, bool, Bernoulli, GaussianBayesPointMachineClassifierTrainingSettings, BinaryBayesPointMachineClassifierPredictionSettings<bool>>
             CreateGaussianPriorBinaryClassifier<TInstanceSource, TInstance, TLabelSource>(
                 IBayesPointMachineClassifierMapping<TInstanceSource, TInstance, TLabelSource, bool> mapping)
         {
@@ -629,7 +532,7 @@ namespace Microsoft.ML.Probabilistic.Learners
         /// <typeparam name="TLabelSource">The type of a source of labels.</typeparam>
         /// <param name="mapping">The mapping used for accessing data in the native format.</param>
         /// <returns>The multi-class Bayes point machine classifier instance.</returns>
-        internal static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, int, Discrete, GaussianBayesPointMachineClassifierTrainingSettings, MulticlassBayesPointMachineClassifierPredictionSettings<int>>
+        public static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, int, Discrete, GaussianBayesPointMachineClassifierTrainingSettings, MulticlassBayesPointMachineClassifierPredictionSettings<int>>
             CreateGaussianPriorMulticlassClassifier<TInstanceSource, TInstance, TLabelSource>(
                 IBayesPointMachineClassifierMapping<TInstanceSource, TInstance, TLabelSource, int> mapping)
         {
@@ -651,7 +554,7 @@ namespace Microsoft.ML.Probabilistic.Learners
         /// <typeparam name="TLabel">The type of a label.</typeparam>
         /// <param name="mapping">The mapping used for accessing data in the standard format.</param>
         /// <returns>The binary Bayes point machine classifier instance.</returns>
-        internal static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, IDictionary<TLabel, double>, GaussianBayesPointMachineClassifierTrainingSettings, BinaryBayesPointMachineClassifierPredictionSettings<TLabel>>
+        public static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, IDictionary<TLabel, double>, GaussianBayesPointMachineClassifierTrainingSettings, BinaryBayesPointMachineClassifierPredictionSettings<TLabel>>
             CreateGaussianPriorBinaryClassifier<TInstanceSource, TInstance, TLabelSource, TLabel>(
                 IClassifierMapping<TInstanceSource, TInstance, TLabelSource, TLabel, Vector> mapping)
         {
@@ -673,7 +576,7 @@ namespace Microsoft.ML.Probabilistic.Learners
         /// <typeparam name="TLabel">The type of a label.</typeparam>
         /// <param name="mapping">The mapping used for accessing data in the standard format.</param>
         /// <returns>The multi-class Bayes point machine classifier instance.</returns>
-        internal static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, IDictionary<TLabel, double>, GaussianBayesPointMachineClassifierTrainingSettings, MulticlassBayesPointMachineClassifierPredictionSettings<TLabel>>
+        public static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, IDictionary<TLabel, double>, GaussianBayesPointMachineClassifierTrainingSettings, MulticlassBayesPointMachineClassifierPredictionSettings<TLabel>>
             CreateGaussianPriorMulticlassClassifier<TInstanceSource, TInstance, TLabelSource, TLabel>(
                 IClassifierMapping<TInstanceSource, TInstance, TLabelSource, TLabel, Vector> mapping)
         {
@@ -700,7 +603,7 @@ namespace Microsoft.ML.Probabilistic.Learners
         /// <typeparam name="TLabelDistribution">The type of a distribution over labels.</typeparam>
         /// <param name="fileName">The file name.</param>
         /// <returns>The deserialized binary Bayes point machine classifier object.</returns>
-        internal static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, TLabelDistribution, GaussianBayesPointMachineClassifierTrainingSettings, BinaryBayesPointMachineClassifierPredictionSettings<TLabel>>
+        public static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, TLabelDistribution, GaussianBayesPointMachineClassifierTrainingSettings, BinaryBayesPointMachineClassifierPredictionSettings<TLabel>>
             LoadGaussianPriorBinaryClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, TLabelDistribution>(string fileName)
         {
             return Utilities.Load<IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, TLabelDistribution, GaussianBayesPointMachineClassifierTrainingSettings, BinaryBayesPointMachineClassifierPredictionSettings<TLabel>>>(fileName);
@@ -718,7 +621,7 @@ namespace Microsoft.ML.Probabilistic.Learners
         /// <param name="stream">The stream.</param>
         /// <param name="formatter">The formatter.</param>
         /// <returns>The deserialized binary Bayes point machine classifier object.</returns>
-        internal static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, TLabelDistribution, GaussianBayesPointMachineClassifierTrainingSettings, BinaryBayesPointMachineClassifierPredictionSettings<TLabel>>
+        public static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, TLabelDistribution, GaussianBayesPointMachineClassifierTrainingSettings, BinaryBayesPointMachineClassifierPredictionSettings<TLabel>>
             LoadGaussianPriorBinaryClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, TLabelDistribution>(Stream stream, IFormatter formatter)
         {
             return Utilities.Load<IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, TLabelDistribution, GaussianBayesPointMachineClassifierTrainingSettings, BinaryBayesPointMachineClassifierPredictionSettings<TLabel>>>(stream, formatter);
@@ -735,7 +638,7 @@ namespace Microsoft.ML.Probabilistic.Learners
         /// <typeparam name="TLabelDistribution">The type of a distribution over labels.</typeparam>
         /// <param name="fileName">The file name.</param>
         /// <returns>The deserialized multi-class Bayes point machine classifier object.</returns>
-        internal static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, TLabelDistribution, GaussianBayesPointMachineClassifierTrainingSettings, MulticlassBayesPointMachineClassifierPredictionSettings<TLabel>>
+        public static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, TLabelDistribution, GaussianBayesPointMachineClassifierTrainingSettings, MulticlassBayesPointMachineClassifierPredictionSettings<TLabel>>
             LoadBackwardCompatibleGaussianPriorMulticlassClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, TLabelDistribution>(string fileName)
         {
             return Utilities.Load<IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, TLabelDistribution, GaussianBayesPointMachineClassifierTrainingSettings, MulticlassBayesPointMachineClassifierPredictionSettings<TLabel>>>(fileName);
@@ -753,7 +656,7 @@ namespace Microsoft.ML.Probabilistic.Learners
         /// <param name="stream">The stream.</param>
         /// <param name="formatter">The formatter.</param>
         /// <returns>The deserialized multi-class Bayes point machine classifier object.</returns>
-        internal static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, TLabelDistribution, GaussianBayesPointMachineClassifierTrainingSettings, MulticlassBayesPointMachineClassifierPredictionSettings<TLabel>>
+        public static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, TLabelDistribution, GaussianBayesPointMachineClassifierTrainingSettings, MulticlassBayesPointMachineClassifierPredictionSettings<TLabel>>
             LoadBackwardCompatibleGaussianPriorMulticlassClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, TLabelDistribution>(Stream stream, IFormatter formatter)
         {
             return Utilities.Load<IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, TLabelDistribution, GaussianBayesPointMachineClassifierTrainingSettings, MulticlassBayesPointMachineClassifierPredictionSettings<TLabel>>>(stream, formatter);
@@ -761,21 +664,21 @@ namespace Microsoft.ML.Probabilistic.Learners
 
         #endregion
 
-        #region Internal custom binary deserialization
+        #region Internal custom deserialization
 
         /// <summary>
         /// Deserializes a binary Bayes point machine classifier with <see cref="Gaussian"/> prior distributions
-        /// over factorized weights from a reader to a binary stream and a native data format mapping.
+        /// over factorized weights from a reader to a stream and a native data format mapping.
         /// </summary>
         /// <typeparam name="TInstanceSource">The type of a source of instances.</typeparam>
         /// <typeparam name="TInstance">The type of an instance.</typeparam>
         /// <typeparam name="TLabelSource">The type of a source of labels.</typeparam>
-        /// <param name="reader">The reader to a binary stream of a serialized binary Bayes point machine classifier.</param>
+        /// <param name="reader">The reader to a stream of a serialized binary Bayes point machine classifier.</param>
         /// <param name="mapping">The mapping used for accessing data in the native format.</param>
         /// <returns>The binary Bayes point machine classifier instance.</returns>
-        internal static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, bool, Bernoulli, GaussianBayesPointMachineClassifierTrainingSettings, BinaryBayesPointMachineClassifierPredictionSettings<bool>>
+        public static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, bool, Bernoulli, GaussianBayesPointMachineClassifierTrainingSettings, BinaryBayesPointMachineClassifierPredictionSettings<bool>>
             LoadBackwardCompatibleGaussianPriorBinaryClassifier<TInstanceSource, TInstance, TLabelSource>(
-                BinaryReader reader, IBayesPointMachineClassifierMapping<TInstanceSource, TInstance, TLabelSource, bool> mapping)
+                IReader reader, IBayesPointMachineClassifierMapping<TInstanceSource, TInstance, TLabelSource, bool> mapping)
         {
             if (reader == null)
             {
@@ -792,31 +695,6 @@ namespace Microsoft.ML.Probabilistic.Learners
 
         /// <summary>
         /// Deserializes a binary Bayes point machine classifier with <see cref="Gaussian"/> prior distributions
-        /// over factorized weights from a binary stream and a native data format mapping.
-        /// </summary>
-        /// <typeparam name="TInstanceSource">The type of a source of instances.</typeparam>
-        /// <typeparam name="TInstance">The type of an instance.</typeparam>
-        /// <typeparam name="TLabelSource">The type of a source of labels.</typeparam>
-        /// <param name="stream">The binary stream of a serialized binary Bayes point machine classifier.</param>
-        /// <param name="mapping">The mapping used for accessing data in the native format.</param>
-        /// <returns>The binary Bayes point machine classifier instance.</returns>
-        internal static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, bool, Bernoulli, GaussianBayesPointMachineClassifierTrainingSettings, BinaryBayesPointMachineClassifierPredictionSettings<bool>>
-            LoadBackwardCompatibleGaussianPriorBinaryClassifier<TInstanceSource, TInstance, TLabelSource>(
-                Stream stream, IBayesPointMachineClassifierMapping<TInstanceSource, TInstance, TLabelSource, bool> mapping)
-        {
-            if (stream == null)
-            {
-                throw new ArgumentNullException(nameof(stream));
-            }
-
-            using (var reader = new BinaryReader(stream, Encoding.UTF8, true))
-            {
-                return LoadBackwardCompatibleGaussianPriorBinaryClassifier(reader, mapping);
-            }
-        }
-
-        /// <summary>
-        /// Deserializes a binary Bayes point machine classifier with <see cref="Gaussian"/> prior distributions
         /// over factorized weights from a file with the specified name and a native data format mapping.
         /// </summary>
         /// <typeparam name="TInstanceSource">The type of a source of instances.</typeparam>
@@ -825,7 +703,7 @@ namespace Microsoft.ML.Probabilistic.Learners
         /// <param name="fileName">The name of the file of a serialized binary Bayes point machine classifier.</param>
         /// <param name="mapping">The mapping used for accessing data in the native format.</param>
         /// <returns>The binary Bayes point machine classifier instance.</returns>
-        internal static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, bool, Bernoulli, GaussianBayesPointMachineClassifierTrainingSettings, BinaryBayesPointMachineClassifierPredictionSettings<bool>>
+        public static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, bool, Bernoulli, GaussianBayesPointMachineClassifierTrainingSettings, BinaryBayesPointMachineClassifierPredictionSettings<bool>>
             LoadBackwardCompatibleGaussianPriorBinaryClassifier<TInstanceSource, TInstance, TLabelSource>(
                 string fileName, IBayesPointMachineClassifierMapping<TInstanceSource, TInstance, TLabelSource, bool> mapping)
         {
@@ -834,25 +712,25 @@ namespace Microsoft.ML.Probabilistic.Learners
                 throw new ArgumentNullException(nameof(fileName));
             }
 
-            using (Stream stream = File.Open(fileName, FileMode.Open))
+            return WithReader(fileName, reader =>
             {
-                return LoadBackwardCompatibleGaussianPriorBinaryClassifier(stream, mapping);
-            }
+                return LoadBackwardCompatibleGaussianPriorBinaryClassifier(reader, mapping);
+            });
         }
 
         /// <summary>
         /// Deserializes a multi-class Bayes point machine classifier with <see cref="Gaussian"/> prior distributions
-        /// over factorized weights from a reader to a binary stream and a native data format mapping.
+        /// over factorized weights from a reader to a stream and a native data format mapping.
         /// </summary>
         /// <typeparam name="TInstanceSource">The type of a source of instances.</typeparam>
         /// <typeparam name="TInstance">The type of an instance.</typeparam>
         /// <typeparam name="TLabelSource">The type of a source of labels.</typeparam>
-        /// <param name="reader">The reader to a binary stream of a serialized multi-class Bayes point machine classifier.</param>
+        /// <param name="reader">The reader to a stream of a serialized multi-class Bayes point machine classifier.</param>
         /// <param name="mapping">The mapping used for accessing data in the native format.</param>
         /// <returns>The multi-class Bayes point machine classifier instance.</returns>
-        internal static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, int, Discrete, GaussianBayesPointMachineClassifierTrainingSettings, MulticlassBayesPointMachineClassifierPredictionSettings<int>>
+        public static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, int, Discrete, GaussianBayesPointMachineClassifierTrainingSettings, MulticlassBayesPointMachineClassifierPredictionSettings<int>>
             LoadBackwardCompatibleGaussianPriorMulticlassClassifier<TInstanceSource, TInstance, TLabelSource>(
-                BinaryReader reader, IBayesPointMachineClassifierMapping<TInstanceSource, TInstance, TLabelSource, int> mapping)
+                IReader reader, IBayesPointMachineClassifierMapping<TInstanceSource, TInstance, TLabelSource, int> mapping)
         {
             if (reader == null)
             {
@@ -869,31 +747,6 @@ namespace Microsoft.ML.Probabilistic.Learners
 
         /// <summary>
         /// Deserializes a multi-class Bayes point machine classifier with <see cref="Gaussian"/> prior distributions
-        /// over factorized weights from a binary stream and a native data format mapping.
-        /// </summary>
-        /// <typeparam name="TInstanceSource">The type of a source of instances.</typeparam>
-        /// <typeparam name="TInstance">The type of an instance.</typeparam>
-        /// <typeparam name="TLabelSource">The type of a source of labels.</typeparam>
-        /// <param name="stream">The binary stream of a serialized multi-class Bayes point machine classifier.</param>
-        /// <param name="mapping">The mapping used for accessing data in the native format.</param>
-        /// <returns>The multi-class Bayes point machine classifier instance.</returns>
-        internal static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, int, Discrete, GaussianBayesPointMachineClassifierTrainingSettings, MulticlassBayesPointMachineClassifierPredictionSettings<int>>
-            LoadBackwardCompatibleGaussianPriorMulticlassClassifier<TInstanceSource, TInstance, TLabelSource>(
-                Stream stream, IBayesPointMachineClassifierMapping<TInstanceSource, TInstance, TLabelSource, int> mapping)
-        {
-            if (stream == null)
-            {
-                throw new ArgumentNullException(nameof(stream));
-            }
-
-            using (var reader = new BinaryReader(stream, Encoding.UTF8, true))
-            {
-                return LoadBackwardCompatibleGaussianPriorMulticlassClassifier(reader, mapping);
-            }
-        }
-
-        /// <summary>
-        /// Deserializes a multi-class Bayes point machine classifier with <see cref="Gaussian"/> prior distributions
         /// over factorized weights from a file with the specified name and a native data format mapping.
         /// </summary>
         /// <typeparam name="TInstanceSource">The type of a source of instances.</typeparam>
@@ -902,7 +755,7 @@ namespace Microsoft.ML.Probabilistic.Learners
         /// <param name="fileName">The name of the file of a serialized multi-class Bayes point machine classifier.</param>
         /// <param name="mapping">The mapping used for accessing data in the native format.</param>
         /// <returns>The multi-class Bayes point machine classifier instance.</returns>
-        internal static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, int, Discrete, GaussianBayesPointMachineClassifierTrainingSettings, MulticlassBayesPointMachineClassifierPredictionSettings<int>>
+        public static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, int, Discrete, GaussianBayesPointMachineClassifierTrainingSettings, MulticlassBayesPointMachineClassifierPredictionSettings<int>>
             LoadBackwardCompatibleGaussianPriorMulticlassClassifier<TInstanceSource, TInstance, TLabelSource>(
                 string fileName, IBayesPointMachineClassifierMapping<TInstanceSource, TInstance, TLabelSource, int> mapping)
         {
@@ -911,26 +764,26 @@ namespace Microsoft.ML.Probabilistic.Learners
                 throw new ArgumentNullException(nameof(fileName));
             }
 
-            using (Stream stream = File.Open(fileName, FileMode.Open))
+            return WithReader(fileName, reader =>
             {
-                return LoadBackwardCompatibleGaussianPriorMulticlassClassifier(stream, mapping);
-            }
+                return LoadBackwardCompatibleGaussianPriorMulticlassClassifier(reader, mapping);
+            });
         }
 
         /// <summary>
         /// Deserializes a binary Bayes point machine classifier with <see cref="Gaussian"/> prior distributions
-        /// over factorized weights from a reader to a binary stream and a standard data format mapping.
+        /// over factorized weights from a reader to a stream and a standard data format mapping.
         /// </summary>
         /// <typeparam name="TInstanceSource">The type of a source of instances.</typeparam>
         /// <typeparam name="TInstance">The type of an instance.</typeparam>
         /// <typeparam name="TLabelSource">The type of a source of labels.</typeparam>
         /// <typeparam name="TLabel">The type of a label.</typeparam>
-        /// <param name="reader">The reader to a binary stream of a serialized binary Bayes point machine classifier.</param>
+        /// <param name="reader">The reader to a stream of a serialized binary Bayes point machine classifier.</param>
         /// <param name="mapping">The mapping used for accessing data in the standard format.</param>
         /// <returns>The binary Bayes point machine classifier instance.</returns>
-        internal static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, IDictionary<TLabel, double>, GaussianBayesPointMachineClassifierTrainingSettings, BinaryBayesPointMachineClassifierPredictionSettings<TLabel>>
+        public static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, IDictionary<TLabel, double>, GaussianBayesPointMachineClassifierTrainingSettings, BinaryBayesPointMachineClassifierPredictionSettings<TLabel>>
             LoadBackwardCompatibleGaussianPriorBinaryClassifier<TInstanceSource, TInstance, TLabelSource, TLabel>(
-                BinaryReader reader, IClassifierMapping<TInstanceSource, TInstance, TLabelSource, TLabel, Vector> mapping)
+                IReader reader, IClassifierMapping<TInstanceSource, TInstance, TLabelSource, TLabel, Vector> mapping)
         {
             if (reader == null)
             {
@@ -947,32 +800,6 @@ namespace Microsoft.ML.Probabilistic.Learners
 
         /// <summary>
         /// Deserializes a binary Bayes point machine classifier with <see cref="Gaussian"/> prior distributions
-        /// over factorized weights from a binary stream and a standard data format mapping.
-        /// </summary>
-        /// <typeparam name="TInstanceSource">The type of a source of instances.</typeparam>
-        /// <typeparam name="TInstance">The type of an instance.</typeparam>
-        /// <typeparam name="TLabelSource">The type of a source of labels.</typeparam>
-        /// <typeparam name="TLabel">The type of a label.</typeparam>
-        /// <param name="stream">The binary stream of a serialized binary Bayes point machine classifier.</param>
-        /// <param name="mapping">The mapping used for accessing data in the standard format.</param>
-        /// <returns>The binary Bayes point machine classifier instance.</returns>
-        internal static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, IDictionary<TLabel, double>, GaussianBayesPointMachineClassifierTrainingSettings, BinaryBayesPointMachineClassifierPredictionSettings<TLabel>>
-            LoadBackwardCompatibleGaussianPriorBinaryClassifier<TInstanceSource, TInstance, TLabelSource, TLabel>(
-                Stream stream, IClassifierMapping<TInstanceSource, TInstance, TLabelSource, TLabel, Vector> mapping)
-        {
-            if (stream == null)
-            {
-                throw new ArgumentNullException(nameof(stream));
-            }
-
-            using (var reader = new BinaryReader(stream, Encoding.UTF8, true))
-            {
-                return LoadBackwardCompatibleGaussianPriorBinaryClassifier(reader, mapping);
-            }
-        }
-
-        /// <summary>
-        /// Deserializes a binary Bayes point machine classifier with <see cref="Gaussian"/> prior distributions
         /// over factorized weights from a file with the specified name and a standard data format mapping.
         /// </summary>
         /// <typeparam name="TInstanceSource">The type of a source of instances.</typeparam>
@@ -982,7 +809,7 @@ namespace Microsoft.ML.Probabilistic.Learners
         /// <param name="fileName">The name of the file of a serialized binary Bayes point machine classifier.</param>
         /// <param name="mapping">The mapping used for accessing data in the standard format.</param>
         /// <returns>The binary Bayes point machine classifier instance.</returns>
-        internal static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, IDictionary<TLabel, double>, GaussianBayesPointMachineClassifierTrainingSettings, BinaryBayesPointMachineClassifierPredictionSettings<TLabel>>
+        public static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, IDictionary<TLabel, double>, GaussianBayesPointMachineClassifierTrainingSettings, BinaryBayesPointMachineClassifierPredictionSettings<TLabel>>
             LoadBackwardCompatibleGaussianPriorBinaryClassifier<TInstanceSource, TInstance, TLabelSource, TLabel>(
                 string fileName, IClassifierMapping<TInstanceSource, TInstance, TLabelSource, TLabel, Vector> mapping)
         {
@@ -991,26 +818,26 @@ namespace Microsoft.ML.Probabilistic.Learners
                 throw new ArgumentNullException(nameof(fileName));
             }
 
-            using (Stream stream = File.Open(fileName, FileMode.Open))
+            return WithReader(fileName, reader =>
             {
-                return LoadBackwardCompatibleGaussianPriorBinaryClassifier(stream, mapping);
-            }
+                return LoadBackwardCompatibleGaussianPriorBinaryClassifier(reader, mapping);
+            });
         }
 
         /// <summary>
         /// Deserializes a multi-class Bayes point machine classifier with <see cref="Gaussian"/> prior distributions
-        /// over factorized weights from a reader to a binary stream and a standard data format mapping.
+        /// over factorized weights from a reader to a stream and a standard data format mapping.
         /// </summary>
         /// <typeparam name="TInstanceSource">The type of a source of instances.</typeparam>
         /// <typeparam name="TInstance">The type of an instance.</typeparam>
         /// <typeparam name="TLabelSource">The type of a source of labels.</typeparam>
         /// <typeparam name="TLabel">The type of a label.</typeparam>
-        /// <param name="reader">The reader to a binary stream of a serialized multi-class Bayes point machine classifier.</param>
+        /// <param name="reader">The reader to a stream of a serialized multi-class Bayes point machine classifier.</param>
         /// <param name="mapping">The mapping used for accessing data in the standard format.</param>
         /// <returns>The multi-class Bayes point machine classifier instance.</returns>
-        internal static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, IDictionary<TLabel, double>, GaussianBayesPointMachineClassifierTrainingSettings, MulticlassBayesPointMachineClassifierPredictionSettings<TLabel>>
+        public static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, IDictionary<TLabel, double>, GaussianBayesPointMachineClassifierTrainingSettings, MulticlassBayesPointMachineClassifierPredictionSettings<TLabel>>
             LoadBackwardCompatibleGaussianPriorMulticlassClassifier<TInstanceSource, TInstance, TLabelSource, TLabel>(
-                BinaryReader reader, IClassifierMapping<TInstanceSource, TInstance, TLabelSource, TLabel, Vector> mapping)
+                IReader reader, IClassifierMapping<TInstanceSource, TInstance, TLabelSource, TLabel, Vector> mapping)
         {
             if (reader == null)
             {
@@ -1027,32 +854,6 @@ namespace Microsoft.ML.Probabilistic.Learners
 
         /// <summary>
         /// Deserializes a multi-class Bayes point machine classifier with <see cref="Gaussian"/> prior distributions
-        /// over factorized weights from a binary stream and a standard data format mapping.
-        /// </summary>
-        /// <typeparam name="TInstanceSource">The type of a source of instances.</typeparam>
-        /// <typeparam name="TInstance">The type of an instance.</typeparam>
-        /// <typeparam name="TLabelSource">The type of a source of labels.</typeparam>
-        /// <typeparam name="TLabel">The type of a label.</typeparam>
-        /// <param name="stream">The binary stream of a serialized multi-class Bayes point machine classifier.</param>
-        /// <param name="mapping">The mapping used for accessing data in the standard format.</param>
-        /// <returns>The multi-class Bayes point machine classifier instance.</returns>
-        internal static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, IDictionary<TLabel, double>, GaussianBayesPointMachineClassifierTrainingSettings, MulticlassBayesPointMachineClassifierPredictionSettings<TLabel>>
-            LoadBackwardCompatibleGaussianPriorMulticlassClassifier<TInstanceSource, TInstance, TLabelSource, TLabel>(
-                Stream stream, IClassifierMapping<TInstanceSource, TInstance, TLabelSource, TLabel, Vector> mapping)
-        {
-            if (stream == null)
-            {
-                throw new ArgumentNullException(nameof(stream));
-            }
-
-            using (var reader = new BinaryReader(stream, Encoding.UTF8, true))
-            {
-                return LoadBackwardCompatibleGaussianPriorMulticlassClassifier(reader, mapping);
-            }
-        }
-
-        /// <summary>
-        /// Deserializes a multi-class Bayes point machine classifier with <see cref="Gaussian"/> prior distributions
         /// over factorized weights from a file with the specified name and a standard data format mapping.
         /// </summary>
         /// <typeparam name="TInstanceSource">The type of a source of instances.</typeparam>
@@ -1062,7 +863,7 @@ namespace Microsoft.ML.Probabilistic.Learners
         /// <param name="fileName">The name of the file of a serialized multi-class Bayes point machine classifier.</param>
         /// <param name="mapping">The mapping used for accessing data in the standard format.</param>
         /// <returns>The multi-class Bayes point machine classifier instance.</returns>
-        internal static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, IDictionary<TLabel, double>, GaussianBayesPointMachineClassifierTrainingSettings, MulticlassBayesPointMachineClassifierPredictionSettings<TLabel>>
+        public static IBayesPointMachineClassifier<TInstanceSource, TInstance, TLabelSource, TLabel, IDictionary<TLabel, double>, GaussianBayesPointMachineClassifierTrainingSettings, MulticlassBayesPointMachineClassifierPredictionSettings<TLabel>>
             LoadBackwardCompatibleGaussianPriorMulticlassClassifier<TInstanceSource, TInstance, TLabelSource, TLabel>(
                 string fileName, IClassifierMapping<TInstanceSource, TInstance, TLabelSource, TLabel, Vector> mapping)
         {
@@ -1071,12 +872,33 @@ namespace Microsoft.ML.Probabilistic.Learners
                 throw new ArgumentNullException(nameof(fileName));
             }
 
-            using (Stream stream = File.Open(fileName, FileMode.Open))
+            return WithReader(fileName, reader =>
             {
-                return LoadBackwardCompatibleGaussianPriorMulticlassClassifier(stream, mapping);
-            }
+                return LoadBackwardCompatibleGaussianPriorMulticlassClassifier(reader, mapping);
+            });
         }
 
         #endregion
+
+        internal static T WithReader<T>(string fileName, Func<IReader, T> action)
+        {
+            using (var stream = File.Open(fileName, FileMode.Open))
+            {
+                if (fileName.EndsWith(".bin"))
+                {
+                    using (var reader = new WrappedBinaryReader(new BinaryReader(stream)))
+                    {
+                        return action(reader);
+                    }
+                }
+                else
+                {
+                    using (var reader = new WrappedTextReader(new StreamReader(stream)))
+                    {
+                        return action(reader);
+                    }
+                }
+            }
+        }
     }
 }

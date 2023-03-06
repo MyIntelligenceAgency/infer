@@ -889,6 +889,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
             IExpression newExpr = ConvertExpression(ice.Expression);
             if (ReferenceEquals(newExpr, ice.Expression))
                 return ice;
+            if (newExpr is null) return newExpr;
             return Builder.CheckedExpr(newExpr);
         }
 
@@ -1112,10 +1113,7 @@ namespace Microsoft.ML.Probabilistic.Compiler.Transforms
             IMethodReference newMethod = ConvertMethodReference(imre.Method);
             if (ReferenceEquals(newTarget, imre.Target) && ReferenceEquals(newMethod, imre.Method))
                 return imre;
-            IMethodReferenceExpression mre = Builder.MethodRefExpr();
-            mre.Method = newMethod;
-            mre.Target = newTarget;
-            return mre;
+            return Builder.MethodRefExpr(newMethod, newTarget);
         }
 
         protected virtual IExpression ConvertTypeOfExpr(ITypeOfExpression itoe)

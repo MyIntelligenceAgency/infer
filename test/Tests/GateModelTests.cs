@@ -4,13 +4,16 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using Microsoft.ML.Probabilistic.Algorithms;
+using Microsoft.ML.Probabilistic.Models.Attributes;
 using Microsoft.ML.Probabilistic.Models;
 using Microsoft.ML.Probabilistic.Factors;
+using Microsoft.ML.Probabilistic.Compiler;
 using Microsoft.ML.Probabilistic.Distributions;
 using Microsoft.ML.Probabilistic.Math;
 using Microsoft.ML.Probabilistic.Utilities;
 using Xunit;
-using Range = Microsoft.ML.Probabilistic.Models.Range;
 
 namespace Microsoft.ML.Probabilistic.Tests
 {
@@ -21,10 +24,6 @@ namespace Microsoft.ML.Probabilistic.Tests
     using Assert = Microsoft.ML.Probabilistic.Tests.AssertHelper;
     using BernoulliArray = DistributionStructArray<Bernoulli, bool>;
     using BernoulliArrayArray = DistributionRefArray<DistributionStructArray<Bernoulli, bool>, bool[]>;
-    using Microsoft.ML.Probabilistic.Compiler;
-    using System.Diagnostics;
-    using Microsoft.ML.Probabilistic.Algorithms;
-    using Microsoft.ML.Probabilistic.Models.Attributes;
     using Range = Microsoft.ML.Probabilistic.Models.Range;
 
     public class GateModelTests
@@ -56,7 +55,7 @@ namespace Microsoft.ML.Probabilistic.Tests
         }
 
         [Fact]
-        public void ForEachIfObservedTest()
+        public void ForEachIfObservedConstrainTrueTest()
         {
             Range item = new Range(2).Named("item");
             VariableArray<bool> array1 = Variable.Observed(new[] { false, true }, item).Named("array1");
@@ -261,11 +260,10 @@ namespace Microsoft.ML.Probabilistic.Tests
             }
             block.CloseBlock();
             InferenceEngine engine = new InferenceEngine();
-            object statesActual = engine.Infer(states);
-            Console.WriteLine("states = ");
-            Console.WriteLine(statesActual);
+            var statesActual = engine.Infer<IList<Gaussian>>(states);
             double evActual = engine.Infer<Bernoulli>(evidence).LogOdds;
-            Console.WriteLine("evidence = {0}", System.Math.Exp(evActual));
+            Gaussian state2Expected = new Gaussian(1, 1);
+            Assert.True(state2Expected.MaxDiff(statesActual[2]) < 1e-10);
         }
 
         [Fact]
@@ -290,20 +288,48 @@ namespace Microsoft.ML.Probabilistic.Tests
             }
             block.CloseBlock();
             InferenceEngine engine = new InferenceEngine();
-            object statesActual = engine.Infer(states);
-            Console.WriteLine("states = ");
-            Console.WriteLine(statesActual);
+            var statesActual = engine.Infer<IList<Gaussian>>(states);
             double evActual = engine.Infer<Bernoulli>(evidence).LogOdds;
-            Console.WriteLine("evidence = {0}", System.Math.Exp(evActual));
             Assert.True(MMath.AbsDiff(0, evActual) < 1e-10);
             Gaussian state2Expected = new Gaussian(0, 1002);
-            Console.WriteLine("expected states[2] = {0}", state2Expected);
-            Assert.True(state2Expected.MaxDiff(((DistributionArray<Gaussian, double>)statesActual)[2]) < 1e-10);
+            Assert.True(state2Expected.MaxDiff(statesActual[2]) < 1e-10);
+        }
+
+        [Fact]
+        public void CaseLoopIndexTest3()
+        {
+            Variable<bool> evidence = Variable.Bernoulli(0.5).Named("evidence");
+            IfBlock block = Variable.If(evidence);
+            Range rows = new Range(4).Named("i");
+            VariableArray<double> states = Variable.Array<double>(rows).Named("states");
+            using (ForEachBlock rowBlock = Variable.ForEach(rows))
+            {
+                using (Variable.Case(rowBlock.Index, 0))
+                {
+                    states[rowBlock.Index] = Variable.GaussianFromMeanAndVariance(0, 1000);
+                }
+                using (Variable.Case(rowBlock.Index, 1))
+                {
+                    states[rowBlock.Index] = Variable.GaussianFromMeanAndVariance(1, 1000);
+                }
+                using (Variable.If(rowBlock.Index > 1))
+                {
+                    Variable<int> rowMinusOne = rowBlock.Index - 1;
+                    states[rowBlock.Index] = Variable.GaussianFromMeanAndVariance(states[rowMinusOne], 1);
+                }
+            }
+            block.CloseBlock();
+            InferenceEngine engine = new InferenceEngine();
+            var statesActual = engine.Infer<IList<Gaussian>>(states);
+            double evActual = engine.Infer<Bernoulli>(evidence).LogOdds;
+            Assert.True(MMath.AbsDiff(0, evActual) < 1e-10);
+            Gaussian state3Expected = new Gaussian(1, 1002);
+            Assert.True(state3Expected.MaxDiff(statesActual[3]) < 1e-10);
         }
 
         // Fails with error: Cannot a define a variable more than once in the same condition context
         //[Fact]
-        internal void CaseLoopIndexTest3()
+        internal void CaseLoopIndexBroken()
         {
             Range rows = new Range(3).Named("i");
             VariableArray<double> states = Variable.Array<double>(rows).Named("states");
@@ -2337,7 +2363,7 @@ namespace Microsoft.ML.Probabilistic.Tests
         }
 
         [Fact]
-        public void IfObservedConditionTest4()
+        public void ForEachIfObservedConstrainEqualRandomTest()
         {
             double pT = 0.1;
             double pF = 0.5;
@@ -4337,6 +4363,11 @@ namespace Microsoft.ML.Probabilistic.Tests
                 Variable.ConstrainEqualRandom(b[indexObs], likelihood2[index]);
             }
             InferenceEngine engine = new InferenceEngine();
+            engine.Compiler.Compiled += (sender, e) =>
+            {
+                // check for the inefficient replication warning
+                Assert.Equal(1, e.Warnings.Count);
+            };
             for (int trial = 0; trial < 2; trial++)
             {
                 indexObs.ObservedValue = trial;
@@ -4565,6 +4596,41 @@ namespace Microsoft.ML.Probabilistic.Tests
                 Bernoulli cActual = engine.Infer<Bernoulli>(c);
                 Console.WriteLine("c = {0} should be {1}", cActual, cExpected);
                 Assert.True(cExpected.MaxDiff(cActual) < 1e-10);
+            }
+        }
+
+        [Fact]
+        public void IfExitObservedConditionTest2()
+        {
+            Variable<bool> b = Variable.New<bool>().Named("b");
+            Variable<bool> c = Variable.New<bool>().Named("c");
+            using (Variable.If(b))
+            {
+                c.SetTo(Variable.Bernoulli(0.125));
+            }
+            using (Variable.IfNot(b))
+            {
+                c.SetTo(Variable.Bernoulli(0.25));
+            }
+            var d = !c;
+            d.Name = nameof(d);
+            InferenceEngine engine = new InferenceEngine();
+            Bernoulli dExpected;
+            for (int trial = 0; trial < 2; trial++)
+            {
+                if (trial % 2 == 0)
+                {
+                    b.ObservedValue = true;
+                    dExpected = new Bernoulli(1 - 0.125);
+                }
+                else
+                {
+                    b.ObservedValue = false;
+                    dExpected = new Bernoulli(1 - 0.25);
+                }
+                Bernoulli dActual = engine.Infer<Bernoulli>(d);
+                Console.WriteLine("d = {0} should be {1}", dActual, dExpected);
+                Assert.True(dExpected.MaxDiff(dActual) < 1e-10);
             }
         }
 
@@ -5111,7 +5177,7 @@ namespace Microsoft.ML.Probabilistic.Tests
         }
 
         [Fact]
-        public void IfObservedConditionTest()
+        public void IfObservedConstrainTrueTest()
         {
             Variable<bool> b = Variable.New<bool>().Named("b");
             Variable<bool> c = Variable.Bernoulli(0.1).Named("c");
@@ -5148,15 +5214,14 @@ namespace Microsoft.ML.Probabilistic.Tests
             Variable<int> b = Variable.New<int>().Named("b");
             Bernoulli cPrior = new Bernoulli(0.1);
             Variable<bool> c = Variable.Bernoulli(0.1).Named("c");
-            Bernoulli cLike0 = new Bernoulli(0.2);
-            Bernoulli cLike1 = new Bernoulli(0.3);
+            VariableArray<Bernoulli> cLike = Variable.Observed(new Bernoulli[] { new Bernoulli(0.2), new Bernoulli(0.3) }).Named("cLike");
             using (Variable.Case(b, 0))
             {
-                Variable.ConstrainEqualRandom(c, cLike0);
+                Variable.ConstrainEqualRandom(c, cLike[0]);
             }
             using (Variable.Case(b, 1))
             {
-                Variable.ConstrainEqualRandom(c, cLike1);
+                Variable.ConstrainEqualRandom(c, cLike[1]);
             }
             InferenceEngine engine = new InferenceEngine();
             Bernoulli cExpected;
@@ -5167,11 +5232,11 @@ namespace Microsoft.ML.Probabilistic.Tests
                     b.ObservedValue = trial;
                     if (trial == 0)
                     {
-                        cExpected = cPrior * cLike0;
+                        cExpected = cPrior * cLike.ObservedValue[0];
                     }
                     else if (trial == 1)
                     {
-                        cExpected = cPrior * cLike1;
+                        cExpected = cPrior * cLike.ObservedValue[1];
                     }
                     else
                     {
@@ -5185,7 +5250,50 @@ namespace Microsoft.ML.Probabilistic.Tests
         }
 
         [Fact]
-        public void IfObservedConditionTest2()
+        public void CaseObservedConditionTest2()
+        {
+            Variable<int> b = Variable.New<int>().Named("b");
+            Bernoulli cPrior = new Bernoulli(0.1);
+            VariableArray<Bernoulli> cLike = Variable.Observed(new Bernoulli[] { new Bernoulli(0.2), new Bernoulli(0.3) }).Named("cLike");
+            Range item = new Range((b+1).Named("bPlus1")).Named("item");
+            VariableArray<bool> c = Variable.Array<bool>(item).Named("c");
+            c[item] = Variable.Bernoulli(0.1).ForEach(item);
+            using (Variable.Case(b, 0))
+            {
+                Variable.ConstrainEqualRandom(c[0], cLike[0]);
+            }
+            using (Variable.Case(b, 1))
+            {
+                Variable.ConstrainEqualRandom(c[1], cLike[1]);
+            }
+            InferenceEngine engine = new InferenceEngine();
+            BernoulliArray cExpected;
+            for (int iter = 0; iter < 2; iter++)
+            {
+                for (int trial = 0; trial < 3; trial++)
+                {
+                    b.ObservedValue = trial;
+                    if (trial == 0)
+                    {
+                        cExpected = new BernoulliArray(new Bernoulli[] { cPrior * cLike.ObservedValue[0] });
+                    }
+                    else if (trial == 1)
+                    {
+                        cExpected = new BernoulliArray(new Bernoulli[] { cPrior, cPrior * cLike.ObservedValue[1] });
+                    }
+                    else
+                    {
+                        cExpected = new BernoulliArray(new Bernoulli[] { cPrior, cPrior, cPrior });
+                    }
+                    IList<Bernoulli> cActual = engine.Infer<IList<Bernoulli>>(c);
+                    Console.WriteLine("c = {0} should be {1}", cActual, cExpected);
+                    Assert.True(cExpected.MaxDiff(cActual) < 1e-10);
+                }
+            }
+        }
+
+        [Fact]
+        public void IfObservedConstrainTrueElseTest()
         {
             Variable<bool> evidence = Variable.Bernoulli(0.5).Named("evidence");
             IfBlock block = Variable.If(evidence);
@@ -5227,7 +5335,7 @@ namespace Microsoft.ML.Probabilistic.Tests
         }
 
         [Fact]
-        public void IfObservedConditionTest3()
+        public void IfObservedConstrainEqualRandomTest()
         {
             Variable<bool> evidence = Variable.Bernoulli(0.5).Named("evidence");
             IfBlock block = Variable.If(evidence);
@@ -6291,18 +6399,16 @@ namespace Microsoft.ML.Probabilistic.Tests
         public void CaseExitTest()
         {
             double priorB = 0.1;
-            double pXCond0 = 0.3;
-            double pXCond1 = 0.4;
-
-            Variable<int> b = Variable.Discrete(new double[] { priorB, 1 - priorB }).Named("b");
+            VariableArray<double> pX = Variable.Observed(new double[] { 0.3, 0.4 }).Named("pX");
+            Variable<int> b = Variable.Discrete(pX.Range, new double[] { priorB, 1 - priorB }).Named("b");
             Variable<bool> x = Variable.New<bool>().Named("x");
             using (Variable.Case(b, 0))
             {
-                x.SetTo(Variable.Bernoulli(pXCond0));
+                x.SetTo(Variable.Bernoulli(pX[0]));
             }
             using (Variable.Case(b, 1))
             {
-                x.SetTo(Variable.Bernoulli(pXCond1));
+                x.SetTo(Variable.Bernoulli(pX[1]));
             }
 
             InferenceEngine ie = new InferenceEngine();
@@ -6310,7 +6416,7 @@ namespace Microsoft.ML.Probabilistic.Tests
             Bernoulli xDist = ie.Infer<Bernoulli>(x);
             // p(x,b) =propto (pb)^b (1-pb)^(1-b) [(pT)^x (1-pT)^(1-x)]^b [(pF)^x (1-pF)^(1-x)]^(1-b)
             double postB = priorB;
-            double postX = priorB * pXCond0 + (1 - priorB) * pXCond1;
+            double postX = priorB * pX.ObservedValue[0] + (1 - priorB) * pX.ObservedValue[1];
             Console.WriteLine("b = {0} (should be {1})", bDist, postB);
             Console.WriteLine("x = {0} (should be {1})", xDist, postX);
             Assert.True(System.Math.Abs(bDist[0] - postB) < 1e-4);
@@ -7173,7 +7279,7 @@ namespace Microsoft.ML.Probabilistic.Tests
             engine.Compiler.Compiled += (sender, e) =>
             {
                 // check for the inefficient replication warning
-                Assert.True(e.Warnings.Count == 1);
+                Assert.Equal(1, e.Warnings.Count);
             };
             DistributionArray<Bernoulli> bDist = engine.Infer<DistributionArray<Bernoulli>>(b);
             for (int i = 0; i < bDist.Count; i++)
@@ -7215,7 +7321,7 @@ namespace Microsoft.ML.Probabilistic.Tests
             engine.Compiler.Compiled += (sender, e) =>
             {
                 // check for the inefficient replication warning
-                Assert.True(e.Warnings.Count == 1);
+                Assert.Equal(1, e.Warnings.Count);
             };
             DistributionArray<Bernoulli> bDist = engine.Infer<DistributionArray<Bernoulli>>(b);
             for (int i = 0; i < bDist.Count; i++)
@@ -7229,6 +7335,57 @@ namespace Microsoft.ML.Probabilistic.Tests
                 Console.WriteLine("error = {0}", MMath.AbsDiff(bDist[i].GetProbTrue(), bPost, 1e-10).ToString("g4"));
                 Assert.True(MMath.AbsDiff(bDist[i].GetProbTrue(), bPost, 1e-10) < 1e-4);
             }
+        }
+
+        [Fact]
+        public void EnterArrayElementsTest3()
+        {
+            Range item = new Range(2).Named("item");
+            Range xitem = new Range(2).Named("xitem");
+            VariableArray<bool> x = Variable.Array<bool>(xitem).Named("x");
+            double xPrior = 0.3;
+            x[xitem] = Variable.Bernoulli(xPrior).ForEach(xitem);
+            VariableArray<int> indices = Variable.Array<int>(item).Named("indices");
+            indices.ObservedValue = new int[] { 0, 1 };
+            VariableArray<int> indices2 = Variable.Array<int>(item).Named("indices2");
+            indices2.ObservedValue = new int[] { 1, 0 };
+            VariableArray<bool> b = Variable.Array<bool>(item).Named("b");
+            double bPrior = 0.1;
+            double xLike = 0.4;
+            using (Variable.ForEach(item))
+            {
+                b[item] = Variable.Bernoulli(bPrior);
+                using (Variable.If(b[item]))
+                {
+                    var index = Variable.Max(0, indices[item]);
+                    index.Name = nameof(index);
+                    Variable.ConstrainEqualRandom(x[index], new Bernoulli(xLike));
+                }
+            }
+
+            InferenceEngine engine = new InferenceEngine();
+            engine.ShowProgress = false;
+            engine.Compiler.Compiled += (sender, e) =>
+            {
+                // check for the inefficient replication warning
+                Assert.Equal(1, e.Warnings.Count);
+            };
+            DistributionArray<Bernoulli> bDist = engine.Infer<DistributionArray<Bernoulli>>(b);
+            for (int i = 0; i < bDist.Count; i++)
+            {
+                double sumCondT = xPrior * xLike + (1 - xPrior) * (1 - xLike);
+                double bPost = bPrior * sumCondT / (bPrior * sumCondT + (1 - bPrior));
+                Assert.True(MMath.AbsDiff(bDist[i].GetProbTrue(), bPost, 1e-10) < 1e-10);
+            }
+
+            b.ObservedValue = new bool[] { true, false };
+            InferenceEngine engine2 = new InferenceEngine();
+            engine2.ShowProgress = false;
+            engine2.Compiler.Compiled += (sender, e) =>
+            {
+                Assert.Equal(0, e.Warnings.Count);
+            };
+            DistributionArray<Bernoulli> bDist2 = engine2.Infer<DistributionArray<Bernoulli>>(b);
         }
 
         internal void FairCoinTest()

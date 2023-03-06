@@ -31,7 +31,7 @@ namespace Microsoft.ML.Probabilistic.Learners.BayesPointMachineClassifierInterna
         /// The current custom binary serialization version of the
         /// <see cref="MulticlassNativeClassifierMapping{TInstanceSource,TInstance,TLabelSource,TLabel}"/> class.
         /// </summary>
-        private const int CustomSerializationVersion = 1;
+        private const int CustomSerializationVersion = 2;
 
         /// <summary>
         /// A bidirectional mapping from class labels to class label indexes.
@@ -54,12 +54,21 @@ namespace Microsoft.ML.Probabilistic.Learners.BayesPointMachineClassifierInterna
         /// </summary>
         /// <param name="reader">The binary reader to read the mapping from.</param>
         /// <param name="standardMapping">The mapping for accessing data in standard format.</param>
-        public MulticlassNativeClassifierMapping(BinaryReader reader, IClassifierMapping<TInstanceSource, TInstance, TLabelSource, TLabel, Vector> standardMapping)
+        public MulticlassNativeClassifierMapping(IReader reader, IClassifierMapping<TInstanceSource, TInstance, TLabelSource, TLabel, Vector> standardMapping)
             : base(reader, standardMapping)
         {
             int deserializedVersion = reader.ReadSerializationVersion(CustomSerializationVersion);
 
-            if (deserializedVersion == CustomSerializationVersion)
+            if (deserializedVersion >= 2)
+            {
+                int count = reader.ReadInt32();
+                this.classLabelSet = new IndexedSet<TLabel>();
+                for (int i = 0; i < count; i++)
+                {
+                    this.classLabelSet.Add(standardMapping.ParseLabel(reader.ReadString()));
+                }
+            }
+            else
             {
                 this.classLabelSet = new IndexedSet<TLabel>(reader);
             }
@@ -97,7 +106,7 @@ namespace Microsoft.ML.Probabilistic.Learners.BayesPointMachineClassifierInterna
             Debug.Assert(instanceSource != null, "The instance source must not be null.");
 
             // Guarantee consistent order of class label indexes
-            var orderedClassLabels = this.StandardMapping.GetClassLabelsSafe(instanceSource, labelSource).OrderBy(classLabel => classLabel);
+            var orderedClassLabels = this.StandardMapping.GetClassLabelsSafe(instanceSource, labelSource);
             this.classLabelSet = new IndexedSet<TLabel>(orderedClassLabels);
         }
 
@@ -131,12 +140,23 @@ namespace Microsoft.ML.Probabilistic.Learners.BayesPointMachineClassifierInterna
         /// Saves the state of the data mapping using the specified writer to a binary stream.
         /// </summary>
         /// <param name="writer">The writer to save the state of the data mapping to.</param>
-        public override void SaveForwardCompatible(BinaryWriter writer)
+        public override void SaveForwardCompatible(IWriter writer)
         {
             base.SaveForwardCompatible(writer);
 
             writer.Write(CustomSerializationVersion);
-            this.classLabelSet.SaveForwardCompatible(writer);
+            if (CustomSerializationVersion >= 2 && string.Empty.Length == 0)
+            {
+                writer.Write(this.classLabelSet.Count);
+                foreach (var item in this.classLabelSet.Elements)
+                {
+                    writer.Write(this.StandardMapping.LabelToString(item));
+                }
+            }
+            else
+            {
+                this.classLabelSet.SaveForwardCompatible(writer);
+            }
         }
         
         /// <summary>

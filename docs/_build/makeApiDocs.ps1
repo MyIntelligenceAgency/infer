@@ -41,18 +41,19 @@ if (!(Test-Path $projPath)) {
 & "$dotnetExe" build "$projPath" /p:Configuration=Release
 
 Write-Host "Run PrepareSource for InferNet_Copy_Temp folder"
-$prepareSourcePath = [IO.Path]::GetFullPath((join-path $sourceDirectory 'src/Tools/PrepareSource/bin/Release/netcoreapp3.1/Microsoft.ML.Probabilistic.Tools.PrepareSource.dll'))
+$prepareSourcePath = [IO.Path]::GetFullPath((join-path $sourceDirectory 'src/Tools/PrepareSource/bin/Release/net6.0/Microsoft.ML.Probabilistic.Tools.PrepareSource.dll'))
 & "$dotnetExe" "$prepareSourcePath" "$destinationDirectory"
 
 Write-Host "Install nuget package docfx.console"
-Install-Package -Name docfx.console -provider Nuget -Source https://nuget.org/api/v2 -RequiredVersion 2.48.1 -Destination $scriptDir\..\..\packages -Force
+$version = '2.58.9'
+Install-Package -Name docfx.console -provider Nuget -Source https://nuget.org/api/v2 -RequiredVersion $version -Destination $scriptDir\..\..\packages -Force
 Write-Host "Run docfx"
-$docFXPath = [IO.Path]::GetFullPath((join-path $scriptDir '../../packages/docfx.console.2.48.1/tools/docfx.exe'))
+$docFxPath = [IO.Path]::GetFullPath((join-path $scriptDir "../../packages/docfx.console.$version/tools/docfx.exe"))
 $docFxJsonPath = "$scriptDir/../docfx.json"
-& "$docFXPath" "$docFxJsonPath"
+& "$docFxPath" "$docFxJsonPath"
 if($LASTEXITCODE)
 {
-    if(!(Invoke-Expression "& mono ""$docFXPath"" ""$docFxJsonPath"""))
+    if(!(Invoke-Expression "& mono ""$docFxPath"" ""$docFxJsonPath"""))
     {
         Write-Error -Message ("ERROR: Unable to evaluate """ + $docFxCmd + """. Maybe Mono hasn't been installed")
     }

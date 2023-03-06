@@ -6,9 +6,9 @@ namespace Microsoft.ML.Probabilistic.Distributions
 {
     using System;
 
-    public class TruncatableDistribution<T> : ITruncatableDistribution<T>
+    public class TruncatableDistribution<T> : ITruncatableDistribution<T>, CanGetLogProb<T>
     {
-        public CanGetProbLessThan<T> CanGetProbLessThan { get; }
+        public readonly CanGetProbLessThan<T> CanGetProbLessThan;
 
         public TruncatableDistribution(CanGetProbLessThan<T> canGetProbLessThan)
         {
@@ -37,6 +37,12 @@ namespace Microsoft.ML.Probabilistic.Distributions
         public ITruncatableDistribution<T> Truncate(T lowerBound, T upperBound)
         {
             return (ITruncatableDistribution<T>)new TruncatedDistribution((ITruncatableDistribution<double>)this, (double)(object)lowerBound, (double)(object)upperBound);
+        }
+
+        /// <inheritdoc/>
+        public double GetLogProb(T value)
+        {
+            return ((CanGetLogProb<T>)CanGetProbLessThan).GetLogProb(value);
         }
 
         /// <inheritdoc/>

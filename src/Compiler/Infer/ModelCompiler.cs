@@ -553,7 +553,6 @@ namespace Microsoft.ML.Probabilistic.Compiler
         }
 
         // Model methods with up to ten parameters are supported directly.
-#pragma warning disable 1591
         /// <exclude/>
         public delegate void ModelDefinitionMethod();
 
@@ -716,7 +715,6 @@ namespace Microsoft.ML.Probabilistic.Compiler
         {
             return CompileWithoutParams(method.Method);
         }
-#pragma warning restore 1591
 
         /// <summary>
         /// Compiles the model defined in MSL by the specified method.  The model parameters are set
@@ -882,6 +880,7 @@ namespace Microsoft.ML.Probabilistic.Compiler
             tc.AddTransform(new ExternalVariablesTransform());
             tc.AddTransform(new IntermediateVariableTransform());
             tc.AddTransform(new ModelAnalysisTransform());
+            tc.AddTransform(new ConstantFoldingTransform());
             tc.AddTransform(new ArrayAnalysisTransform());
             tc.AddTransform(new EqualityPropagationTransform());
             tc.AddTransform(new StocAnalysisTransform(true));
@@ -947,7 +946,7 @@ namespace Microsoft.ML.Probabilistic.Compiler
             var lct2 = new LoopCuttingTransform(true);
             tc.AddTransform(lct2);
             tc.AddTransform(lct2); // run again to catch uses before declaration
-            if(OptimiseInferenceCode)
+            if (OptimiseInferenceCode)
             {
                 // must run after HoistingTransform
                 tc.AddTransform(new LoopRemovalTransform());

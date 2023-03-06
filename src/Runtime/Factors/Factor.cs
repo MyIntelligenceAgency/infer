@@ -677,7 +677,7 @@ namespace Microsoft.ML.Probabilistic.Factors
             int sum = 0;
             for (int i = 0; i < array.Count; i++)
             {
-                sum = sum + array[i];
+                sum += array[i];
             }
             return sum;
         }
@@ -692,7 +692,7 @@ namespace Microsoft.ML.Probabilistic.Factors
             double sum = 0;
             for (int i = 0; i < array.Count; i++)
             {
-                sum = sum + array[i];
+                sum += array[i];
             }
             return sum;
         }
@@ -1095,6 +1095,48 @@ namespace Microsoft.ML.Probabilistic.Factors
         public static double Double(int integer)
         {
             return (double)integer;
+        }
+
+        public static double ProbLessThan<T>(CanGetProbLessThan<T> canGetProbLessThan, T upperBound)
+        {
+            return canGetProbLessThan.GetProbLessThan(upperBound);
+        }
+
+        public static double ProbBetween<T>(CanGetProbLessThan<T> canGetProbLessThan, T lowerBound, T upperBound)
+        {
+            return canGetProbLessThan.GetProbBetween(lowerBound, upperBound);
+        }
+
+        public static double Quantile(CanGetQuantile<double> canGetQuantile, double probability)
+        {
+            return canGetQuantile.GetQuantile(probability);
+        }
+
+        /// <summary>
+        /// Returns the integral from lowerBound to upperBound of func(x) times p(x).
+        /// </summary>
+        public static double Integral(double lowerBound, double upperBound, Func<double, double> func, ITruncatableDistribution<double> distribution)
+        {
+            var dist = new TruncatedDistribution(distribution, lowerBound, upperBound);
+            // To approximate the average, we divide the region into intervals of equal probability.
+            // We compute the function at the midpoint of each interval, and take an unweighted average.
+            // The quantile ranks of the midpoints are 0.5/count, 1.5/count, ..., (count-0.5)/count
+            const int count = 100;
+            double increment = 1.0 / count;
+            double start = increment / 2;
+            double sum = 0;
+            for (int i = 0; i < count; i++)
+            {
+                double quantileRank = start + i * increment;
+                double input = dist.GetQuantile(quantileRank);
+                sum += func(input);
+            }
+            return sum * increment * distribution.GetProbBetween(lowerBound, upperBound);
+        }
+
+        public static TResult Invoke<T,TResult>(Func<T,TResult> func, T arg)
+        {
+            return func(arg);
         }
     }
 }

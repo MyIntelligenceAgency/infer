@@ -194,7 +194,7 @@ namespace Microsoft.ML.Probabilistic.Factors
 
     /// <include file='FactorDocs.xml' path='factor_docs/message_op_class[@name="GaussianProductOp"]/doc/*'/>
     [FactorMethod(typeof(Factor), "Product", typeof(double), typeof(double), Default = true)]
-    [FactorMethod(new string[] { "A", "Product", "B" }, typeof(Factor), "Ratio", typeof(double), typeof(double), Default=true)]
+    //[FactorMethod(new string[] { "A", "Product", "B" }, typeof(Factor), "Ratio", typeof(double), typeof(double), Default=true)]
     [Quality(QualityBand.Mature)]
     public class GaussianProductOp : GaussianProductOpEvidenceBase
     {
@@ -227,7 +227,7 @@ namespace Microsoft.ML.Probabilistic.Factors
             if (B.IsPointMass)
                 return ProductAverageConditional(A, B.Point);
             if (Product.IsPointMass)
-                throw new NotImplementedException();
+                return GaussianProductOp_Slow.ProductAverageConditional(Product, A, B);
             if (Product.Precision < 1e-100)
                 return GaussianProductVmpOp.ProductAverageLogarithm(A, B);
             double mA, vA;
@@ -300,6 +300,8 @@ namespace Microsoft.ML.Probabilistic.Factors
             // together = (a^2*vb^2 + 4*a^2*vb*mb^2 + vb*mp^2 - 6*a*vb*mb*mp - vp*(vb+mb^2))/(vp + a^2*vb)^2
             if (double.IsInfinity(vB))
                 throw new ArgumentException("vB is infinite");
+            if (Product.IsPointMass)
+                throw new ArgumentException("Product is a point mass");
             // v*Product.Precision
             double v = 1 + a * a * vB * Product.Precision;
             // diff*Product.Precision
@@ -351,8 +353,7 @@ namespace Microsoft.ML.Probabilistic.Factors
             B.GetMeanAndVariance(out mB, out vB);
             if (A.IsPointMass)
             {
-                double dlogf, ddlogf;
-                ADerivatives(mA, mB, vB, Product, out dlogf, out ddlogf);
+                ADerivatives(mA, mB, vB, Product, out double dlogf, out double ddlogf);
                 return Gaussian.FromDerivatives(mA, dlogf, ddlogf, ForceProper);
             }
             else
@@ -380,14 +381,14 @@ namespace Microsoft.ML.Probabilistic.Factors
                     sumA2 += a * a * fInvA;
                 }
                 double mean = sumA / z;
-                double var = sumA2 / z - mean * mean;
-                if (z == 0 || var <= 0)
+                double variance = sumA2 / z - mean * mean;
+                if (z == 0 || variance <= 0 || variance >= vA)
                 {
                     return GaussianProductOp_Slow.AAverageConditional(Product, A, B);
                     //throw new Exception("quadrature failed");
                 }
                 Gaussian result = new Gaussian();
-                result.SetMeanAndVariance(mean, var);
+                result.SetMeanAndVariance(mean, variance);
                 result.SetToRatio(result, A, ForceProper);
                 return result;
             }
@@ -459,7 +460,7 @@ namespace Microsoft.ML.Probabilistic.Factors
 
     /// <include file='FactorDocs.xml' path='factor_docs/message_op_class[@name="GaussianProductOp"]/doc/*'/>
     [FactorMethod(typeof(Factor), "Product", typeof(double), typeof(double), Default = true)]
-    [FactorMethod(new string[] { "A", "Product", "B" }, typeof(Factor), "Ratio", typeof(double), typeof(double), Default = true)]
+    //[FactorMethod(new string[] { "A", "Product", "B" }, typeof(Factor), "Ratio", typeof(double), typeof(double), Default = true)]
     [Quality(QualityBand.Mature)]
     public class GaussianProductOp_Slow : GaussianProductOpEvidenceBase
     {
@@ -541,9 +542,7 @@ namespace Microsoft.ML.Probabilistic.Factors
                         double diff = mProduct - a * mB;
                         double diffv = diff / v;
                         double diffv2 = diffv * diffv;
-                        double v2 = v * v;
                         double dlogf = -diffv;
-                        double avb = a * vB;
                         double ddlogf = diffv2 -1/v;
                         if ((i == 0 || i == n - 1) && (logf > -49))
                             throw new Exception("invalid integration bounds");
@@ -565,23 +564,41 @@ namespace Microsoft.ML.Probabilistic.Factors
                 else
                 {
                     // Compute the marginal and then divide
+                    double rmin = Math.Sign(amin) * Math.Pow(Math.Abs(amin), 1.0 / 3);
+                    double rmax = Math.Sign(amax) * Math.Pow(Math.Abs(amax), 1.0 / 3);
+                    double rinc = (rmax - rmin) / (n - 1);
+                    bool useCube = 1000 * vB > vProduct;
                     MeanVarianceAccumulator mva = new MeanVarianceAccumulator();
                     for (int i = 0; i < n; i++)
                     {
-                        double a = amin + i * inc;
+                        double a, r = default;
+                        if (useCube)
+                        {
+                            r = rmin + i * rinc;
+                            a = Math.Pow(r, 3);
+                        }
+                        else
+                        {
+                            a = amin + i * inc;
+                        }
                         double logfA = LogLikelihoodRatio(a, a0, mProduct, vProduct, mA, pA, mB, vB);
                         double fA = Math.Exp(logfA);
-                        double v = vProduct + a * a * vB;
-                        double mX = a * (mProduct * a * vB + vProduct * mB)/v;
-                        double vX = a*a*vB*vProduct / v;
+                        if (useCube)
+                        {
+                            fA *= 3 * r * r;
+                        }
+                        double avB = a * vB;
+                        double v = vProduct + a * avB;
+                        double mX = a * (mProduct * avB + vProduct * mB) / v;
+                        double vX = a * avB * vProduct / v;
                         mva.Add(mX, vX, fA);
                     }
                     double mean = mva.Mean;
-                    double var = mva.Variance;
-                    if (var <= 0)
+                    double variance = mva.Variance;
+                    if (variance <= 0)
                         throw new Exception("quadrature failed");
                     Gaussian result = new Gaussian();
-                    result.SetMeanAndVariance(mean, var);
+                    result.SetMeanAndVariance(mean, variance);
                     result.SetToRatio(result, Product, GaussianProductOp.ForceProper);
                     return result;
                 }
@@ -661,11 +678,11 @@ namespace Microsoft.ML.Probabilistic.Factors
                         mva.Add(a, fA);
                     }
                     double mean = mva.Mean;
-                    double var = mva.Variance;
-                    if (var <= 0)
+                    double variance = mva.Variance;
+                    if (variance <= 0)
                         throw new Exception("quadrature failed");
                     Gaussian result = new Gaussian();
-                    result.SetMeanAndVariance(mean, var);
+                    result.SetMeanAndVariance(mean, variance);
                     result.SetToRatio(result, A, GaussianProductOp.ForceProper);
                     return result;
                 }
@@ -966,7 +983,7 @@ namespace Microsoft.ML.Probabilistic.Factors
     /// This class allows EP to process the product factor using Laplace Propagation with other variables marginalized out.
     /// </remarks>
     [FactorMethod(typeof(Factor), "Product", typeof(double), typeof(double))]
-    [FactorMethod(new string[] { "A", "Product", "B" }, typeof(Factor), "Ratio", typeof(double), typeof(double), Default = true)]
+    //[FactorMethod(new string[] { "A", "Product", "B" }, typeof(Factor), "Ratio", typeof(double), typeof(double), Default = true)]
     [Quality(QualityBand.Experimental)]
     public class GaussianProductOp_LaplaceProp : GaussianProductOpEvidenceBase
     {
@@ -1006,6 +1023,7 @@ namespace Microsoft.ML.Probabilistic.Factors
         /// <include file='FactorDocs.xml' path='factor_docs/message_op_class[@name="GaussianProductOp_LaplaceProp"]/message_doc[@name="AAverageConditional(Gaussian, Gaussian, Gaussian, Gaussian)"]/*'/>
         public static Gaussian AAverageConditional(Gaussian Product, Gaussian A, Gaussian B, Gaussian to_A)
         {
+            // The factor is N(mx; ahat * mb, vx + ahat * ahat * vb)
             Gaussian Apost = A * to_A;
             double mx, vx;
             Product.GetMeanAndVariance(out mx, out vx);
@@ -1967,82 +1985,6 @@ namespace Microsoft.ML.Probabilistic.Factors
         }
     }
 
-    /// <include file='FactorDocs.xml' path='factor_docs/message_op_class[@name="GaussianRatioEvidenceOp"]/doc/*'/>
-    [FactorMethod(typeof(Factor), "Ratio", typeof(double), typeof(double))]
-    [Quality(QualityBand.Mature)]
-    public static class GaussianRatioEvidenceOp
-    {
-        /// <include file='FactorDocs.xml' path='factor_docs/message_op_class[@name="GaussianRatioEvidenceOp"]/message_doc[@name="LogAverageFactor(Gaussian, Gaussian, double, Gaussian)"]/*'/>
-        public static double LogAverageFactor(Gaussian ratio, Gaussian a, double b, [Fresh] Gaussian to_ratio)
-        {
-            //Gaussian to_ratio = GaussianProductOp.AAverageConditional(a, b);
-            return to_ratio.GetLogAverageOf(ratio);
-        }
-
-        /// <include file='FactorDocs.xml' path='factor_docs/message_op_class[@name="GaussianRatioEvidenceOp"]/message_doc[@name="LogAverageFactor(Gaussian, double, Gaussian, Gaussian)"]/*'/>
-        public static double LogAverageFactor(Gaussian ratio, double a, Gaussian b, [Fresh] Gaussian to_ratio)
-        {
-            return LogAverageFactor(ratio, b, a, to_ratio);
-        }
-
-        /// <include file='FactorDocs.xml' path='factor_docs/message_op_class[@name="GaussianRatioEvidenceOp"]/message_doc[@name="LogAverageFactor(double, Gaussian, double)"]/*'/>
-        public static double LogAverageFactor(double ratio, Gaussian a, double b)
-        {
-            Gaussian to_ratio = GaussianProductOp.AAverageConditional(a, b);
-            return to_ratio.GetLogProb(ratio);
-        }
-
-        /// <include file='FactorDocs.xml' path='factor_docs/message_op_class[@name="GaussianRatioEvidenceOp"]/message_doc[@name="LogAverageFactor(double, double, Gaussian)"]/*'/>
-        public static double LogAverageFactor(double ratio, double a, Gaussian b)
-        {
-            return LogAverageFactor(ratio, b, a);
-        }
-
-        /// <include file='FactorDocs.xml' path='factor_docs/message_op_class[@name="GaussianRatioEvidenceOp"]/message_doc[@name="LogAverageFactor(double, double, double)"]/*'/>
-        public static double LogAverageFactor(double ratio, double a, double b)
-        {
-            return (ratio == Factor.Ratio(a, b)) ? 0.0 : Double.NegativeInfinity;
-        }
-
-        /// <include file='FactorDocs.xml' path='factor_docs/message_op_class[@name="GaussianRatioEvidenceOp"]/message_doc[@name="LogEvidenceRatio(double, double, double)"]/*'/>
-        public static double LogEvidenceRatio(double ratio, double a, double b)
-        {
-            return LogAverageFactor(ratio, a, b);
-        }
-
-        /// <include file='FactorDocs.xml' path='factor_docs/message_op_class[@name="GaussianRatioEvidenceOp"]/message_doc[@name="LogAverageFactor(Gaussian, double, double)"]/*'/>
-        public static double LogAverageFactor(Gaussian ratio, double a, double b)
-        {
-            return ratio.GetLogProb(Factor.Ratio(a, b));
-        }
-
-        /// <include file='FactorDocs.xml' path='factor_docs/message_op_class[@name="GaussianRatioEvidenceOp"]/message_doc[@name="LogEvidenceRatio(Gaussian, Gaussian, double)"]/*'/>
-        [Skip]
-        public static double LogEvidenceRatio(Gaussian ratio, Gaussian a, double b)
-        {
-            return 0.0;
-        }
-
-        /// <include file='FactorDocs.xml' path='factor_docs/message_op_class[@name="GaussianRatioEvidenceOp"]/message_doc[@name="LogEvidenceRatio(Gaussian, double, Gaussian)"]/*'/>
-        [Skip]
-        public static double LogEvidenceRatio(Gaussian ratio, double a, Gaussian b)
-        {
-            return LogEvidenceRatio(ratio, b, a);
-        }
-
-        /// <include file='FactorDocs.xml' path='factor_docs/message_op_class[@name="GaussianRatioEvidenceOp"]/message_doc[@name="LogEvidenceRatio(double, Gaussian, double)"]/*'/>
-        public static double LogEvidenceRatio(double ratio, Gaussian a, double b)
-        {
-            return LogAverageFactor(ratio, a, b);
-        }
-
-        /// <include file='FactorDocs.xml' path='factor_docs/message_op_class[@name="GaussianRatioEvidenceOp"]/message_doc[@name="LogEvidenceRatio(double, double, Gaussian)"]/*'/>
-        public static double LogEvidenceRatio(double ratio, double a, Gaussian b)
-        {
-            return LogEvidenceRatio(ratio, b, a);
-        }
-    }
-
     /// <include file='FactorDocs.xml' path='factor_docs/message_op_class[@name="GaussianProductVmpOp"]/doc/*'/>
     [FactorMethod(typeof(Factor), "Product", typeof(double), typeof(double))]
     [Quality(QualityBand.Mature)]
@@ -2236,72 +2178,6 @@ namespace Microsoft.ML.Probabilistic.Factors
         public static Gaussian BAverageLogarithm(double Product, double A)
         {
             return AAverageLogarithm(Product, A);
-        }
-    }
-
-    /// <include file='FactorDocs.xml' path='factor_docs/message_op_class[@name="GaussianRatioVmpOp"]/doc/*'/>
-    [FactorMethod(typeof(Factor), "Ratio", typeof(double), typeof(double))]
-    [Quality(QualityBand.Mature)]
-    public static class GaussianRatioVmpOp
-    {
-        /// <include file='FactorDocs.xml' path='factor_docs/message_op_class[@name="GaussianRatioVmpOp"]/message_doc[@name="AverageLogFactor(Gaussian)"]/*'/>
-        /// <remarks><para>
-        /// Variational Message Passing does not support a Ratio factor with fixed output or random denominator
-        /// </para></remarks>
-        [Skip]
-        public static double AverageLogFactor(Gaussian ratio)
-        {
-            return 0.0;
-        }
-
-        internal const string NotSupportedMessage = "Variational Message Passing does not support a Ratio factor with fixed output or random denominator.";
-
-        /// <include file='FactorDocs.xml' path='factor_docs/message_op_class[@name="GaussianRatioVmpOp"]/message_doc[@name="RatioAverageLogarithm(Gaussian)"]/*'/>
-        /// <remarks><para>
-        /// Variational Message Passing does not support a Ratio factor with fixed output or random denominator
-        /// </para></remarks>
-        [NotSupported(GaussianRatioVmpOp.NotSupportedMessage)]
-        public static Gaussian RatioAverageLogarithm(Gaussian B)
-        {
-            throw new NotSupportedException(NotSupportedMessage);
-        }
-
-        /// <include file='FactorDocs.xml' path='factor_docs/message_op_class[@name="GaussianRatioVmpOp"]/message_doc[@name="RatioAverageLogarithm(Gaussian, double)"]/*'/>
-        public static Gaussian RatioAverageLogarithm([SkipIfUniform] Gaussian A, double B)
-        {
-            return GaussianProductOp.AAverageConditional(A, B);
-        }
-
-        /// <include file='FactorDocs.xml' path='factor_docs/message_op_class[@name="GaussianRatioVmpOp"]/message_doc[@name="AAverageLogarithm(Gaussian)"]/*'/>
-        /// <remarks><para>
-        /// Variational Message Passing does not support a Ratio factor with fixed output or random denominator
-        /// </para></remarks>
-        [NotSupported(GaussianRatioVmpOp.NotSupportedMessage)]
-        public static Gaussian AAverageLogarithm(Gaussian B)
-        {
-            throw new NotSupportedException(NotSupportedMessage);
-        }
-
-        /// <include file='FactorDocs.xml' path='factor_docs/message_op_class[@name="GaussianRatioVmpOp"]/message_doc[@name="AAverageLogarithm(Gaussian, double)"]/*'/>
-        public static Gaussian AAverageLogarithm([SkipIfUniform] Gaussian ratio, double B)
-        {
-            return GaussianProductOp.ProductAverageConditional(ratio, B);
-        }
-
-        /// <include file='FactorDocs.xml' path='factor_docs/message_op_class[@name="GaussianRatioVmpOp"]/message_doc[@name="AAverageLogarithm(double, double)"]/*'/>
-        public static Gaussian AAverageLogarithm(double ratio, double B)
-        {
-            return GaussianProductOp.ProductAverageConditional(ratio, B);
-        }
-
-        /// <include file='FactorDocs.xml' path='factor_docs/message_op_class[@name="GaussianRatioVmpOp"]/message_doc[@name="BAverageLogarithm()"]/*'/>
-        /// <remarks><para>
-        /// Variational Message Passing does not support a Ratio factor with fixed output or random denominator
-        /// </para></remarks>
-        [NotSupported(GaussianRatioVmpOp.NotSupportedMessage)]
-        public static Gaussian BAverageLogarithm()
-        {
-            throw new NotSupportedException(NotSupportedMessage);
         }
     }
 }

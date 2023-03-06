@@ -211,6 +211,38 @@ namespace Microsoft.ML.Probabilistic.Tests
         }
 
         [Fact]
+        public void DeterministicPowerTest()
+        {
+            foreach (var useMarginalPrototype in new[] { false, true })
+            {
+                var a = Variable.Observed(3.0);
+                if (useMarginalPrototype)
+                    a.AddAttribute(new MarginalPrototype(Gaussian.Uniform()));
+                var b = Variable.Observed(2.0);
+                var c = a ^ b;
+                var engine = new InferenceEngine();
+                var res = engine.Infer<Gaussian>(c);
+                Assert.Equal(9, res.Point);
+            }
+        }
+
+        [Fact]
+        public void DeterministicMaxTest()
+        {
+            foreach (var useMarginalPrototype in new[] { false, true })
+            {
+                var a = Variable.Observed(3.0);
+                if (useMarginalPrototype)
+                    a.AddAttribute(new MarginalPrototype(Gaussian.Uniform()));
+                var b = Variable.Observed(2.0);
+                var c = Variable.Max(a, b);
+                var engine = new InferenceEngine();
+                var res = engine.Infer<Gaussian>(c);
+                Assert.Equal(3, res.Point);
+            }
+        }
+
+        [Fact]
         public void TraceAllMessagesTest()
         {
             Variable<double> x = Variable.GaussianFromMeanAndPrecision(0, 1);
@@ -306,6 +338,9 @@ namespace Microsoft.ML.Probabilistic.Tests
             }
         }
 
+        /// <summary>
+        /// Tests that PointMassAnalysisTransform does not mark x as a ForwardPointMass
+        /// </summary>
         [Fact]
         public void PointMassAnalysisTest()
         {
@@ -1352,7 +1387,7 @@ namespace Microsoft.ML.Probabilistic.Tests
             Range item = new Range(10).Named("item");
             IDistribution<double[]> xPrior = Distribution<double>.Array(Util.ArrayInit(item.SizeAsInt, i => new Gaussian(i, 100)));
             VariableArray<double> x = Variable.Array<double>(item).Named("x");
-            x.SetTo(Variable<double[]>.Random(xPrior));
+            x.SetTo(Variable.Random(xPrior));
             x.AddAttribute(QueryTypes.Marginal);
             x.AddAttribute(QueryTypes.MarginalDividedByPrior);
             IDistribution<double[]> xInit = Distribution<double>.Array(Util.ArrayInit(item.SizeAsInt, i => new Gaussian(i, 1)));
@@ -1374,7 +1409,7 @@ namespace Microsoft.ML.Probabilistic.Tests
             Range item = new Range(10).Named("item");
             IDistribution<double[]> xPrior = Distribution<double>.Array(Util.ArrayInit(item.SizeAsInt, i => new Gaussian(i, 100)));
             VariableArray<double> x = Variable.Array<double>(item).Named("x");
-            x.SetTo(Variable<double[]>.Random(xPrior));
+            x.SetTo(Variable.Random(xPrior));
             x.AddAttribute(QueryTypes.Marginal);
             x.AddAttribute(QueryTypes.MarginalDividedByPrior);
             Gaussian[] xLikeArray = Util.ArrayInit(item.SizeAsInt, i => new Gaussian(i, 10));
@@ -1394,6 +1429,20 @@ namespace Microsoft.ML.Probabilistic.Tests
             var xOutput = (IDistribution<double[]>)gen.Marginal("x", QueryTypes.MarginalDividedByPrior.Name);
             Console.WriteLine(xOutput);
             Assert.True(xOutput.MaxDiff(xLike) < 1e-10);
+        }
+
+        [Fact]
+        public void MarginalDividedByPriorPointMassTest()
+        {
+            Variable<double> x = Variable.Random(Gaussian.PointMass(0.5));
+            //Variable<double> x = Variable.GaussianFromMeanAndVariance(0.5, 0.0);
+            x.Name = nameof(x);
+            x.AddAttribute(QueryTypes.MarginalDividedByPrior);
+            Variable.ConstrainEqualRandom(x, Gaussian.FromNatural(2, 0));
+
+            InferenceEngine engine = new InferenceEngine();
+            var msg = engine.Infer<Gaussian>(x, QueryTypes.MarginalDividedByPrior);
+            Assert.Equal(2, msg.MeanTimesPrecision);
         }
 
         // model from Mark Vanderwel 
@@ -2513,6 +2562,33 @@ namespace Microsoft.ML.Probabilistic.Tests
         }
 
         [Fact]
+        public void InferDeterministicTest5()
+        {
+            Range item = new Range(1);
+            item.Name = nameof(item);
+            Range unwrappedValue = new Range(4).Named("unwrappedValue");
+            Variable<int> unwrapped = Variable.DiscreteUniform(unwrappedValue).Named("unwrapped");
+            Range wrappedValue = new Range(2).Named("wrappedValue");
+            VariableArray<int> wrapped = Variable.Array<int>(item).Named("wrapped");
+            VariableArray<int> modulo2 = Variable.Observed(new int[] { 0, 1, 0, 1 }, unwrappedValue).Named("modulo2");
+            modulo2.SetValueRange(wrappedValue);
+            using (Variable.Switch(unwrapped))
+            {
+                using (var block = Variable.ForEach(item))
+                {
+                    wrapped[item].SetTo(modulo2[unwrapped] + block.Index);
+                }
+            }
+            wrapped.ObservedValue = new[] { 1 };
+            InferenceEngine engine = new InferenceEngine();
+            Console.WriteLine(engine.Infer(unwrapped));
+            var wrappedActual = engine.Infer<IDistribution<int[]>>(wrapped);
+            //Console.WriteLine("wrapped = {0} should be {1}", wrappedActual, Discrete.PointMass(wrapped.ObservedValue, unwrappedValue.SizeAsInt));
+            Assert.True(wrappedActual.IsPointMass);
+            Assert.Equal(wrapped.ObservedValue, wrappedActual.Point);
+        }
+
+        [Fact]
         public void AllTrueTest()
         {
             AllTrue(new ExpectationPropagation());
@@ -2831,7 +2907,7 @@ namespace Microsoft.ML.Probabilistic.Tests
             var y = Variable.Array(Variable.Array<double>(item), user).Named("y");
             using (Variable.ForEach(user))
             {
-                x[user][item] = Variable<Vector>.Random(xPrior).ForEach(item);
+                x[user][item] = Variable.Random(xPrior).ForEach(item);
                 y[user][item] = Variable.GaussianFromMeanAndVariance(Variable.InnerProduct(x[user][item], w[user]).Named("h"), 1);
             }
             if (false)
@@ -2886,7 +2962,7 @@ namespace Microsoft.ML.Probabilistic.Tests
                 y[u] = new Variable<double>[count];
                 for (int i = 0; i < count; i++)
                 {
-                    x[u][i] = Variable<Vector>.Random(xPrior);
+                    x[u][i] = Variable.Random(xPrior);
                     y[u][i] = Variable.GaussianFromMeanAndVariance(Variable.InnerProduct(x[u][i], w[u]), 1);
                     if (false)
                     {
@@ -2969,7 +3045,7 @@ namespace Microsoft.ML.Probabilistic.Tests
             using (Variable.ForEach(user))
             {
                 // this is required for ForEach(feature) to work
-                x[user][feature] = Variable<double>.Random(xPrior).ForEach(feature);
+                x[user][feature] = Variable.Random(xPrior).ForEach(feature);
                 Variable.ConstrainPositive(x[user][feature]);
             }
 
@@ -2998,7 +3074,7 @@ namespace Microsoft.ML.Probabilistic.Tests
 
             // make a jagged array
             var x = Variable.Array(Variable.Array<double>(feature), user).Named("x");
-            x[user][feature] = Variable<double>.Random(xPrior).ForEach(user, feature);
+            x[user][feature] = Variable.Random(xPrior).ForEach(user, feature);
             Variable.ConstrainPositive(x[user][feature]);
 
             InferenceEngine engine = new InferenceEngine();
@@ -3029,7 +3105,7 @@ namespace Microsoft.ML.Probabilistic.Tests
                 Range feature = new Range(sizesVar[user]).Named("feature");
                 using (Variable.ForEach(feature))
                 {
-                    x = Variable<double>.Random(xPrior).Named("x");
+                    x = Variable.Random(xPrior).Named("x");
                     Variable.ConstrainPositive(x);
                 }
             }

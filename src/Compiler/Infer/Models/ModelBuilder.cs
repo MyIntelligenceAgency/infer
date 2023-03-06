@@ -96,7 +96,7 @@ namespace Microsoft.ML.Probabilistic.Models
             List<IStatementBlock> openBlocks = StatementBlock.GetOpenBlocks();
             if (openBlocks.Count > 0)
             {
-                throw new InvalidOperationException("The block " + openBlocks[0] + " has not been closed.");
+                throw new InvalidOperationException($"The block {openBlocks[0]} has not been closed.");
             }
             Reset();
             this.inferOnlySpecifiedVars = inferOnlySpecifiedVars;
@@ -275,8 +275,7 @@ namespace Microsoft.ML.Probabilistic.Models
             {
                 IModelExpression target = method.returnValue;
                 if (method.method.DeclaringType == target.GetType() && method.method.Name == new Func<bool>(Variable<bool>.RemovedBySetTo).Method.Name)
-                    throw new InvalidOperationException("Variable '" + target +
-                                                        "' was consumed by variable.SetTo().  It can no longer be used or inferred.  Perhaps you meant Variable.ConstrainEqual instead of SetTo.");
+                    throw new InvalidOperationException($"Variable '{target}' was consumed by variable.SetTo().  It can no longer be used or inferred.  Perhaps you meant Variable.ConstrainEqual instead of SetTo.");
             }
             if (method.returnValue != null) toSearch.Push(method.returnValue);
             foreach (IModelExpression arg in method.args) toSearch.Push(arg);
@@ -316,7 +315,7 @@ namespace Microsoft.ML.Probabilistic.Models
                     arg is HasObservedValue argHasObservedValue && 
                     argHasObservedValue.IsObserved)
                 {
-                    throw new NotImplementedException(string.Format("Out parameter '{0}' of {1} cannot be observed.  Use ConstrainEqual or observe a copy of the variable.", pi.Name, method));
+                    throw new NotImplementedException($"Out parameter '{pi.Name}' of {method} cannot be observed.  Use ConstrainEqual or observe a copy of the variable.");
                 }
             }
             foreach (IStatementBlock b in method.Containers)
@@ -449,10 +448,7 @@ namespace Microsoft.ML.Probabilistic.Models
                     toSearch.Push(variable.initialiseBackwardTo);
                 }
 
-                if (!variable.Inline)
-                {
-                    variable.Inline = ShouldInline(variable);
-                }
+                variable.Inline = ShouldInline(variable);
 
                 if (variable is IVariableArray iva)
                 {
@@ -488,19 +484,24 @@ namespace Microsoft.ML.Probabilistic.Models
                 SearchMethodInvoke(factor);
         }
 
-        private static bool ShouldInline(Variable variable)
+        private bool ShouldInline<T>(Variable<T> variable)
         {
+            if (variable.IsObserved && variable.IsReadOnly)
+            {
+                return ShouldInlineConstant(variable);
+            }
+
             bool inline;
             if (variable.definition != null)
             {
-                inline = variable.definition.CanBeInlined();
+                inline = variable.definition.CanBeInlined(mustHaveLoopIndex: true);
             }
             else
             {
                 inline = (variable.conditionalDefinitions.Values.Count == 1);
                 foreach (MethodInvoke condDef in variable.conditionalDefinitions.Values)
                 {
-                    inline = inline && condDef.CanBeInlined();
+                    inline = inline && condDef.CanBeInlined(mustHaveLoopIndex: true);
                 }
                 if (variable is HasItemVariables hasItemVariables)
                 {
@@ -546,7 +547,7 @@ namespace Microsoft.ML.Probabilistic.Models
             {
                 if (name.Equals(expr.Name))
                 {
-                    throw new InferCompilerException("Model contains multiple items with the name '" + name + "'.  Names must be unique.");
+                    throw new InferCompilerException($"Model contains multiple items with the name '{name}'.  Names must be unique.");
                 }
             }
         }
@@ -648,7 +649,7 @@ namespace Microsoft.ML.Probabilistic.Models
 
         private bool ShouldInlineConstant<T>(Variable<T> constant)
         {
-            return (Quoter.ShouldInlineType(typeof(T)) && (!constant.IsDefined) && !variablesToInfer.Contains(constant));
+            return Quoter.ShouldInlineType(typeof(T)) && !constant.IsDefined && !variablesToInfer.Contains(constant);
         }
 
         /// <summary>
@@ -834,9 +835,10 @@ namespace Microsoft.ML.Probabilistic.Models
                             for (int i = 0; i < indexVars.Length; i++)
                             {
                                 IModelExpression expr = parent.indices[i];
-                                if (!(expr is Range))
+                                if (expr is Range range)
+                                    indexVars[i] = range.GetIndexDeclaration();
+                                else
                                     throw new Exception(parent + ".InitializeTo is not allowed since the indices are not ranges");
-                                indexVars[i] = ((Range)expr).GetIndexDeclaration();
                             }
                             initExpr = VariableInformation.MakePlaceHolderArrayCreate(initExpr, indexVars);
                             parent = (Variable)parent.ArrayVariable;
@@ -934,8 +936,7 @@ namespace Microsoft.ML.Probabilistic.Models
                 foreach (IVariableDeclaration ivd in indexVars)
                 {
                     if (allVars.Contains(ivd))
-                        throw new CompilationFailedException("Array '" + array.Name + "' is indexed by range '" + ivd.Name +
-                                                             "' on multiple dimensions, which is not allowed.  Use range cloning instead.");
+                        throw new CompilationFailedException($"Array '{array.Name}' is indexed by range '{ivd.Name}' on multiple dimensions, which is not allowed.  Use range cloning instead.");
                     allVars.Add(ivd);
                 }
                 jaggedIndexVars.Add(indexVars);

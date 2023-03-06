@@ -27,7 +27,121 @@ namespace Microsoft.ML.Probabilistic.Tests
 
     public class GatedFactorTests
     {
-        private static bool verbose = false;
+        private static readonly bool verbose = false;
+
+        [Fact]
+        public void BetaTrueCountIsGamma_BigData()
+        {
+            double shape = 2.5;
+            double rate = 3.5;
+            Variable<double> trueCount = Variable.GammaFromShapeAndRate(shape, rate);
+            trueCount.Name = nameof(trueCount);
+            int count = 10000;
+            Range item = new Range(count);
+            var p = Variable.Array<double>(item).Named("p");
+            using (Variable.ForEach(item))
+            {
+                var c = Variable.Bernoulli(0.5);
+
+                using (Variable.If(c))
+                {
+                    p[item] = Variable.Beta(trueCount, 1);
+                }
+
+                using (Variable.IfNot(c))
+                {
+                    p[item] = Variable.Beta(1, 1);
+                }
+            }
+            p.ObservedValue = Util.ArrayInit(count, i => 0.0001);
+
+            InferenceEngine engine = new InferenceEngine();
+            var trueCountActual = engine.Infer<Gamma>(trueCount);
+        }
+
+        [Fact]
+        public void BetaTrueCountIsGamma()
+        {
+            BetaTrueCountIsGamma(new ExpectationPropagation());
+            BetaTrueCountIsGamma(new VariationalMessagePassing());
+
+            void BetaTrueCountIsGamma(IAlgorithm algorithm)
+            {
+                Variable<bool> evidence = Variable.Bernoulli(0.5).Named("evidence");
+                var evBlock = Variable.If(evidence);
+
+                double shape = 2.5;
+                double rate = 3.5;
+                Variable<double> trueCount = Variable.GammaFromShapeAndRate(shape, rate);
+                trueCount.Name = nameof(trueCount);
+                Variable<double> x = Variable.Beta(trueCount, 1).Named("x");
+                x.ObservedValue = 0.25;
+
+                evBlock.CloseBlock();
+
+                InferenceEngine engine = new InferenceEngine(algorithm);
+                var trueCountActual = engine.Infer<Gamma>(trueCount);
+                double xRate = -System.Math.Log(x.ObservedValue);
+                var trueCountExpected = Gamma.FromShapeAndRate(shape + 1, rate + xRate);
+                Assert.True(trueCountExpected.MaxDiff(trueCountActual) < 1e-10);
+
+                var evActual = engine.Infer<Bernoulli>(evidence).LogOdds;
+
+                double evExpected = double.NegativeInfinity;
+                var trueCounts = EpTests.linspace(1e-6, 10, 1000);
+                foreach (var trueCountValue in trueCounts)
+                {
+                    trueCount.ObservedValue = trueCountValue;
+                    double ev = engine.Infer<Bernoulli>(evidence).LogOdds;
+                    evExpected = MMath.LogSumExp(evExpected, ev);
+                }
+                double increment = trueCounts[1] - trueCounts[0];
+                evExpected += System.Math.Log(increment);
+                Assert.True(MMath.AbsDiff(evExpected, evActual, 1e-8) < 1e-6);
+            }
+        }
+
+        [Fact]
+        public void BetaFalseCountIsGamma()
+        {
+            BetaFalseCountIsGamma(new ExpectationPropagation());
+            BetaFalseCountIsGamma(new VariationalMessagePassing());
+
+            void BetaFalseCountIsGamma(IAlgorithm algorithm)
+            {
+                Variable<bool> evidence = Variable.Bernoulli(0.5).Named("evidence");
+                var evBlock = Variable.If(evidence);
+
+                double shape = 2.5;
+                double rate = 3.5;
+                Variable<double> falseCount = Variable.GammaFromShapeAndRate(shape, rate);
+                falseCount.Name = nameof(falseCount);
+                Variable<double> x = Variable.Beta(1, falseCount).Named("x");
+                x.ObservedValue = 0.25;
+
+                evBlock.CloseBlock();
+
+                InferenceEngine engine = new InferenceEngine(algorithm);
+                var falseCountActual = engine.Infer<Gamma>(falseCount);
+                double xRate = -System.Math.Log(1 - x.ObservedValue);
+                var falseCountExpected = Gamma.FromShapeAndRate(shape + 1, rate + xRate);
+                Assert.True(falseCountExpected.MaxDiff(falseCountActual) < 1e-10);
+
+                var evActual = engine.Infer<Bernoulli>(evidence).LogOdds;
+
+                double evExpected = double.NegativeInfinity;
+                var falseCounts = EpTests.linspace(1e-6, 10, 1000);
+                foreach (var falseCountValue in falseCounts)
+                {
+                    falseCount.ObservedValue = falseCountValue;
+                    double ev = engine.Infer<Bernoulli>(evidence).LogOdds;
+                    evExpected = MMath.LogSumExp(evExpected, ev);
+                }
+                double increment = falseCounts[1] - falseCounts[0];
+                evExpected += System.Math.Log(increment);
+                Assert.True(MMath.AbsDiff(evExpected, evActual, 1e-8) < 1e-6);
+            }
+        }
 
         [Fact]
         public void TruncatedGaussianIsBetweenTest()
@@ -2452,7 +2566,7 @@ namespace Microsoft.ML.Probabilistic.Tests
             Variable.ConstrainEqualRandom(x[item], xPrior[item]);
             block.CloseBlock();
 
-            InferenceEngine engine = new InferenceEngine();
+            InferenceEngine engine = new InferenceEngine(algorithm);
             for (int ctrial = 0; ctrial < 3; ctrial++)
             {
                 Vector cMean = Vector.Zero(dc);
@@ -3700,82 +3814,89 @@ namespace Microsoft.ML.Probabilistic.Tests
         [Fact]
         public void GatedIntAreEqualTest()
         {
-            Variable<bool> evidence = Variable.Bernoulli(0.5).Named("evidence");
-            IfBlock block = Variable.If(evidence);
-            Vector priorA = Vector.FromArray(0.1, 0.9);
-            Vector priorB = Vector.FromArray(0.2, 0.8);
-            Variable<int> a = Variable.Discrete(priorA).Named("a");
-            Variable<int> b = Variable.Discrete(priorB).Named("b");
-            Variable<bool> c = (a == b);
-            double priorC = 0.3;
-            Variable.ConstrainEqualRandom(c, new Bernoulli(priorC));
-            block.CloseBlock();
-
-            InferenceEngine engine = new InferenceEngine();
-            double evExpected, evActual;
-
-            double probEqual = priorA.Inner(priorB);
-            double evPrior = 0;
-            for (int atrial = 0; atrial < 2; atrial++)
+            foreach (var algorithm in new IAlgorithm[] { new ExpectationPropagation(), new VariationalMessagePassing() })
             {
-                if (atrial == 1)
+                Variable<bool> evidence = Variable.Bernoulli(0.5).Named("evidence");
+                IfBlock block = Variable.If(evidence);
+                Vector priorA = Vector.FromArray(0.1, 0.9);
+                Vector priorB = Vector.FromArray(0.2, 0.8);
+                Variable<int> a = Variable.Discrete(priorA).Named("a");
+                Variable<int> b = Variable.Discrete(priorB).Named("b");
+                Variable<bool> c = (a == b).Named("c");
+                double priorC = 0.3;
+                Variable.ConstrainEqualRandom(c, new Bernoulli(priorC));
+                block.CloseBlock();
+
+                InferenceEngine engine = new InferenceEngine(algorithm);
+
+                double probEqual = priorA.Inner(priorB);
+                double evPrior = 0;
+                for (int atrial = 0; atrial < 2; atrial++)
                 {
-                    a.ObservedValue = 1;
-                    probEqual = priorB[1];
-                    c.ClearObservedValue();
-                    evPrior = System.Math.Log(priorA[1]);
-                    priorA[0] = 0.0;
-                    priorA[1] = 1.0;
-                }
-                evExpected = System.Math.Log(probEqual * priorC + (1 - probEqual) * (1 - priorC)) + evPrior;
-                evActual = engine.Infer<Bernoulli>(evidence).LogOdds;
-                Console.WriteLine("evidence = {0} should be {1}", evActual, evExpected);
-                Assert.True(MMath.AbsDiff(evExpected, evActual, 1e-5) < 1e-5);
-
-                Bernoulli cExpected = new Bernoulli(probEqual * priorC / (probEqual * priorC + (1 - probEqual) * (1 - priorC)));
-                Bernoulli cActual = engine.Infer<Bernoulli>(c);
-                Console.WriteLine("c = {0} should be {1}", cActual, cExpected);
-                Assert.True(cExpected.MaxDiff(cActual) < 1e-10);
-
-                Vector postB = Vector.Zero(2);
-                postB[0] = priorB[0] * (priorA[0] * priorC + priorA[1] * (1 - priorC));
-                postB[1] = priorB[1] * (priorA[1] * priorC + priorA[0] * (1 - priorC));
-                postB.Scale(1.0 / postB.Sum());
-                Discrete bExpected = new Discrete(postB);
-                Discrete bActual = engine.Infer<Discrete>(b);
-                Console.WriteLine("b = {0} should be {1}", bActual, bExpected);
-                Assert.True(bExpected.MaxDiff(bActual) < 1e-10);
-
-                for (int trial = 0; trial < 2; trial++)
-                {
-                    if (trial == 0)
+                    if (atrial == 1)
                     {
-                        c.ObservedValue = true;
-                        evExpected = System.Math.Log(probEqual * priorC) + evPrior;
+                        a.ObservedValue = 1;
+                        probEqual = priorB[1];
+                        c.ClearObservedValue();
+                        evPrior = System.Math.Log(priorA[1]);
+                        priorA[0] = 0.0;
+                        priorA[1] = 1.0;
                     }
-                    else
-                    {
-                        c.ObservedValue = false;
-                        evExpected = System.Math.Log((1 - probEqual) * (1 - priorC)) + evPrior;
-                    }
-                    evActual = engine.Infer<Bernoulli>(evidence).LogOdds;
+                    double evExpected = System.Math.Log(probEqual * priorC + (1 - probEqual) * (1 - priorC)) + evPrior;
+                    double evActual = engine.Infer<Bernoulli>(evidence).LogOdds;
                     Console.WriteLine("evidence = {0} should be {1}", evActual, evExpected);
-                    Assert.True(MMath.AbsDiff(evExpected, evActual, 1e-5) < 1e-5);
+                    if (algorithm is ExpectationPropagation || atrial == 1)
+                        Assert.True(MMath.AbsDiff(evExpected, evActual, 1e-5) < 1e-5);
 
-                    if (a.IsObserved)
-                    {
-                        bExpected = Discrete.PointMass(c.ObservedValue ? a.ObservedValue : 1 - a.ObservedValue, 2);
-                    }
-                    else
-                    {
-                        postB[0] = priorB[0] * (c.ObservedValue ? priorA[0] : priorA[1]);
-                        postB[1] = priorB[1] * (c.ObservedValue ? priorA[1] : priorA[0]);
-                        postB.Scale(1.0 / postB.Sum());
-                        bExpected = new Discrete(postB);
-                    }
-                    bActual = engine.Infer<Discrete>(b);
+                    Bernoulli cExpected = new Bernoulli(probEqual * priorC / (probEqual * priorC + (1 - probEqual) * (1 - priorC)));
+                    Bernoulli cActual = engine.Infer<Bernoulli>(c);
+                    Console.WriteLine("c = {0} should be {1}", cActual, cExpected);
+                    if (algorithm is ExpectationPropagation || atrial == 1)
+                        Assert.True(cExpected.MaxDiff(cActual) < 1e-10);
+
+                    Vector postB = Vector.Zero(2);
+                    postB[0] = priorB[0] * (priorA[0] * priorC + priorA[1] * (1 - priorC));
+                    postB[1] = priorB[1] * (priorA[1] * priorC + priorA[0] * (1 - priorC));
+                    postB.Scale(1.0 / postB.Sum());
+                    Discrete bExpected = new Discrete(postB);
+                    Discrete bActual = engine.Infer<Discrete>(b);
                     Console.WriteLine("b = {0} should be {1}", bActual, bExpected);
-                    Assert.True(bExpected.MaxDiff(bActual) < 1e-10);
+                    if (algorithm is ExpectationPropagation || atrial == 1)
+                        Assert.True(bExpected.MaxDiff(bActual) < 1e-10);
+
+                    if (atrial == 0 && algorithm is VariationalMessagePassing) continue;
+
+                    for (int trial = 0; trial < 2; trial++)
+                    {
+                        if (trial == 0)
+                        {
+                            c.ObservedValue = true;
+                            evExpected = System.Math.Log(probEqual * priorC) + evPrior;
+                        }
+                        else
+                        {
+                            c.ObservedValue = false;
+                            evExpected = System.Math.Log((1 - probEqual) * (1 - priorC)) + evPrior;
+                        }
+                        evActual = engine.Infer<Bernoulli>(evidence).LogOdds;
+                        Console.WriteLine("evidence = {0} should be {1}", evActual, evExpected);
+                        Assert.True(MMath.AbsDiff(evExpected, evActual, 1e-5) < 1e-5);
+
+                        if (a.IsObserved)
+                        {
+                            bExpected = Discrete.PointMass(c.ObservedValue ? a.ObservedValue : 1 - a.ObservedValue, 2);
+                        }
+                        else
+                        {
+                            postB[0] = priorB[0] * (c.ObservedValue ? priorA[0] : priorA[1]);
+                            postB[1] = priorB[1] * (c.ObservedValue ? priorA[1] : priorA[0]);
+                            postB.Scale(1.0 / postB.Sum());
+                            bExpected = new Discrete(postB);
+                        }
+                        bActual = engine.Infer<Discrete>(b);
+                        Console.WriteLine("b = {0} should be {1}", bActual, bExpected);
+                        Assert.True(bExpected.MaxDiff(bActual) < 1e-10);
+                    }
                 }
             }
         }
@@ -4382,7 +4503,7 @@ namespace Microsoft.ML.Probabilistic.Tests
             evBlock.CloseBlock();
             InferenceEngine engine = new InferenceEngine();
 
-            for (int trial = 0; trial <= 2; trial++)
+            for (int trial = 0; trial <= 3; trial++)
             {
                 if (trial == 0)
                 {
@@ -4394,10 +4515,15 @@ namespace Microsoft.ML.Probabilistic.Tests
                     b.ObservedValue = new[] { 0.0, 0.0 };
                     cLike.ObservedValue = Gaussian.PointMass(0);
                 }
-                else
+                else if (trial == 2)
                 {
                     b.ObservedValue = new[] { 0.0, 2.0 };
                     cLike.ObservedValue = Gaussian.PointMass(2.3);
+                }
+                else 
+                {
+                    b.ObservedValue = new[] { 0.0, 2.0 };
+                    cLike.ObservedValue = Gaussian.FromNatural(-7.3097118076958154E-10, 1.542967011962213E-320);
                 }
 
                 var aActual = engine.Infer<IList<Gaussian>>(a);

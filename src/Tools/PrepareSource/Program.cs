@@ -2,6 +2,9 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
+using System.Reflection;
+
+[assembly: AssemblyVersion("1.0.0.0")]
 namespace Microsoft.ML.Probabilistic.Tools.PrepareSource
 {
     using System;
@@ -59,58 +62,56 @@ namespace Microsoft.ML.Probabilistic.Tools.PrepareSource
 
         private static void ProcessFile(string sourceFileName, string destinationFileName, Dictionary<string, XDocument> loadedDocFiles)
         {
-            using (var reader = new StreamReader(sourceFileName))
-            using (var writer = new StreamWriter(destinationFileName))
+            using var reader = new StreamReader(sourceFileName);
+            using var writer = new StreamWriter(destinationFileName);
+            string line;
+            int lineNumber = 0;
+            while ((line = reader.ReadLine()) != null)
             {
-                string line;
-                int lineNumber = 0;
-                while ((line = reader.ReadLine()) != null)
+                ++lineNumber;
+
+                string trimmedLine = line.Trim();
+                if (!trimmedLine.StartsWith("/// <include", StringComparison.InvariantCulture))
                 {
-                    ++lineNumber;
+                    // Not a line with an include directive
+                    writer.WriteLine(line);
+                    continue;
+                }
 
-                    string trimmedLine = line.Trim();                    
-                    if (!trimmedLine.StartsWith("/// <include", StringComparison.InvariantCulture))
-                    {
-                        // Not a line with an include directive
-                        writer.WriteLine(line);
-                        continue;
-                    }
+                string includeString = trimmedLine.Substring("/// ".Length);
+                var includeDoc = XDocument.Parse(includeString);
 
-                    string includeString = trimmedLine.Substring("/// ".Length);
-                    var includeDoc = XDocument.Parse(includeString);
+                XAttribute fileAttribute = includeDoc.Root.Attribute("file");
+                XAttribute pathAttribute = includeDoc.Root.Attribute("path");
+                if (fileAttribute == null || pathAttribute == null)
+                {
+                    Error("An ill-formed include directive at {0}:{1}", sourceFileName, lineNumber);
+                }
 
-                    XAttribute fileAttribute = includeDoc.Root.Attribute("file");
-                    XAttribute pathAttribute = includeDoc.Root.Attribute("path");
-                    if (fileAttribute == null || pathAttribute == null)
-                    {
-                        Error("An ill-formed include directive at {0}:{1}", sourceFileName, lineNumber);
-                    }
+                string fullDocFileName = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(sourceFileName), fileAttribute.Value));
+                XDocument docFile;
+                if (!loadedDocFiles.TryGetValue(fullDocFileName, out docFile))
+                {
+                    docFile = XDocument.Load(fullDocFileName);
+                    loadedDocFiles.Add(fullDocFileName, docFile);
+                }
 
-                    string fullDocFileName = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(sourceFileName), fileAttribute.Value));
-                    XDocument docFile;
-                    if (!loadedDocFiles.TryGetValue(fullDocFileName, out docFile))
+                XElement[] docElements = ((IEnumerable)docFile.XPathEvaluate(pathAttribute.Value)).Cast<XElement>().ToArray();
+                if (docElements.Length == 0)
+                {
+                    Console.WriteLine("WARNING: nothing to include for the include directive at {0}:{1}", sourceFileName, lineNumber);
+                }
+                else
+                {
+                    int indexOfDocStart = line.IndexOf("/// <include", StringComparison.InvariantCulture);
+                    foreach (XElement docElement in docElements)
                     {
-                        docFile = XDocument.Load(fullDocFileName);
-                        loadedDocFiles.Add(fullDocFileName, docFile);
-                    }
-
-                    XElement[] docElements = ((IEnumerable)docFile.XPathEvaluate(pathAttribute.Value)).Cast<XElement>().ToArray();
-                    if (docElements.Length == 0)
-                    {
-                        Console.WriteLine("WARNING: nothing to include for the include directive at {0}:{1}", sourceFileName, lineNumber);
-                    }
-                    else
-                    {
-                        int indexOfDocStart = line.IndexOf("/// <include", StringComparison.InvariantCulture);
-                        foreach (XElement docElement in docElements)
+                        string[] docElementStringLines = docElement.ToString().Split(new[] { Environment.NewLine }, StringSplitOptions.None);
+                        string indentation = new string(' ', indexOfDocStart);
+                        foreach (string docElementStringLine in docElementStringLines)
                         {
-                            string[] docElementStringLines = docElement.ToString().Split(new[] { Environment.NewLine }, StringSplitOptions.None);
-                            string indentation = new string(' ', indexOfDocStart);
-                            foreach (string docElementStringLine in docElementStringLines)
-                            {
-                                writer.WriteLine("{0}/// {1}", indentation, docElementStringLine);    
-                            }
-                        }    
+                            writer.WriteLine("{0}/// {1}", indentation, docElementStringLine);
+                        }
                     }
                 }
             }

@@ -211,6 +211,10 @@ namespace Microsoft.ML.Probabilistic.Compiler
                     };
                 }
             }
+            else if (expr is ICheckedExpression ice)
+            {
+                return GetBounds(ice.Expression, bounds);
+            }
             return null;
         }
 
@@ -226,27 +230,28 @@ namespace Microsoft.ML.Probabilistic.Compiler
             {
                 return GetVariableDeclaration(expr);
             }
-            else if (expr is IBinaryExpression indexBinaryExpr)
+            else if (expr is ICheckedExpression ice)
             {
-                if (indexBinaryExpr.Left is IVariableReferenceExpression ivre && 
-                    indexBinaryExpr.Right is ILiteralExpression offsetExpr && 
-                    offsetExpr.Value is int)
+                return GetOffsetVariable(ice.Expression, out offset);
+            }
+            else if (expr is IBinaryExpression indexBinaryExpr && 
+                    indexBinaryExpr.Left is IVariableReferenceExpression ivre &&
+                    indexBinaryExpr.Right is ILiteralExpression offsetExpr &&
+                    offsetExpr.Value is int value)
+            {
+                if (indexBinaryExpr.Operator == BinaryOperator.Subtract)
                 {
-                    offset = (int)offsetExpr.Value;
-                    if (indexBinaryExpr.Operator == BinaryOperator.Subtract)
-                    {
-                        offset = -offset;
-                    }
-                    else if (indexBinaryExpr.Operator == BinaryOperator.Add)
-                    {
-                        // do nothing
-                    }
-                    else
-                    {
-                        return null;
-                    }
-                    return GetVariableDeclaration(ivre);
+                    offset = -value;
                 }
+                else if (indexBinaryExpr.Operator == BinaryOperator.Add)
+                {
+                    offset = value;
+                }
+                else
+                {
+                    return null;
+                }
+                return GetVariableDeclaration(ivre);
             }
             return null;
         }
@@ -258,12 +263,15 @@ namespace Microsoft.ML.Probabilistic.Compiler
 
         // helper for MutatingFirstAffectsSecond
         // offsets and extraIndices only need to be modified on a match (though they can be modified in any case)
-        private bool IndicesOverlap(IList<IExpression> mutated_indices, IList<IExpression> affected_indices, bool mutatesWithinOnly,
-                                    IReadOnlyDictionary<IVariableDeclaration, Bounds> boundsInMutated,
-                                    IReadOnlyDictionary<IVariableDeclaration, Bounds> boundsInAffected,
-                                    OffsetInfo offsets,
-                                    ICollection<IVariableDeclaration> extraIndices,
-                                    ICollection<IVariableDeclaration> matchedIndices)
+        private bool IndicesOverlap(
+            IList<IExpression> mutated_indices,
+            IList<IExpression> affected_indices,
+            bool mutatesWithinOnly,
+            IReadOnlyDictionary<IVariableDeclaration, Bounds> boundsInMutated,
+            IReadOnlyDictionary<IVariableDeclaration, Bounds> boundsInAffected,
+            OffsetInfo offsets,
+            ICollection<IVariableDeclaration> extraIndices,
+            ICollection<IVariableDeclaration> matchedIndices)
         {
             // if mutatesWithinOnly = false, then return false on mismatched literals
             // if mutatesWithinOnly = true, then return false also if mutated index is wildcard and affected index is literal
@@ -493,7 +501,7 @@ namespace Microsoft.ML.Probabilistic.Compiler
                 }
                 return false;
             }
-            if(affectedStatement != null && mutatedStatement != null)
+            if (affectedStatement != null && mutatedStatement != null)
             {
                 Set<IVariableDeclaration> localVarsInMutated = new Set<IVariableDeclaration>();
                 var bindingsInMutated = GetBindings(mutatedStatement, localVarsInMutated);
@@ -730,8 +738,10 @@ namespace Microsoft.ML.Probabilistic.Compiler
                     else
                         break;
                 }
-                else
+                else if (!prefix1.Equals(prefix2))
+                {
                     throw new Exception("Unhandled expression type: " + prefix1);
+                }
             }
             return true;
         }
@@ -935,10 +945,18 @@ namespace Microsoft.ML.Probabilistic.Compiler
             {
                 return 1 + System.Math.Max(GetExpressionDepth(iae.Target), GetExpressionDepth(iae.Expression));
             }
+            else if (expr is ICheckedExpression ice)
+            {
+                return 1 + GetExpressionDepth(ice.Expression);
+            }
             else if (expr is IVariableReferenceExpression || expr is ILiteralExpression || expr is IArgumentReferenceExpression || expr is ITypeReferenceExpression
                 || expr is IVariableDeclarationExpression || expr is IArrayCreateExpression)
             {
                 return 1;
+            }
+            else if (expr is IAddressOutExpression iaoe)
+            {
+                return 2;
             }
             else
                 throw new NotImplementedException();
@@ -997,6 +1015,11 @@ namespace Microsoft.ML.Probabilistic.Compiler
                 }
                 else
                     yield return expr;
+            }
+            else if (expr is ICheckedExpression ice)
+            {
+                foreach (var summand in GetSummands(ice.Expression))
+                    yield return summand;
             }
             else
                 yield return expr;
@@ -1108,6 +1131,10 @@ namespace Microsoft.ML.Probabilistic.Compiler
                     return true;
                 }
             }
+            else if (expr is ICheckedExpression ice)
+            {
+                return TryEvaluate(ice.Expression, bindings, out value);
+            }
             value = default(T);
             return false;
         }
@@ -1203,12 +1230,10 @@ namespace Microsoft.ML.Probabilistic.Compiler
                 else if (ibe.Operator == BinaryOperator.GreaterThanOrEqual)
                 {
                     var start = LoopStartExpression(loop);
-                    if (start is IBinaryExpression ibe2)
+                    if (start is IBinaryExpression ibe2 
+                        && ibe2.Operator == BinaryOperator.Subtract)
                     {
-                        if (ibe2.Operator == BinaryOperator.Subtract)
-                        {
-                            return ibe2.Left;
-                        }
+                        return ibe2.Left;
                     }
                 }
                 throw new ArgumentException("Unrecognized loop syntax");
@@ -1268,7 +1293,7 @@ namespace Microsoft.ML.Probabilistic.Compiler
 
             public override string ToString()
             {
-                return String.Format("[{0},{1}]", lowerBound, upperBound);
+                return $"[{lowerBound},{upperBound}]";
             }
         }
 
@@ -1738,6 +1763,11 @@ namespace Microsoft.ML.Probabilistic.Compiler
                 foreach (var decl in GetVariablesAndParameters(iae.Target))
                     yield return decl;
             }
+            else if (expr is ICheckedExpression ice)
+            {
+                foreach (var decl in GetVariablesAndParameters(ice.Expression))
+                    yield return decl;
+            }
             else
             {
                 object decl = GetDeclaration(expr);
@@ -1768,6 +1798,11 @@ namespace Microsoft.ML.Probabilistic.Compiler
                 foreach (var iare in GetArgumentReferenceExpressions(ibe.Left))
                     yield return iare;
                 foreach (var iare in GetArgumentReferenceExpressions(ibe.Right))
+                    yield return iare;
+            }
+            else if (expr is ICheckedExpression ice)
+            {
+                foreach (var iare in GetArgumentReferenceExpressions(ice.Expression))
                     yield return iare;
             }
         }
@@ -2287,10 +2322,11 @@ namespace Microsoft.ML.Probabilistic.Compiler
                 return IsStochastic(context, ipie.Target) || IsAnyStochastic(context, ipie.Indices);
             }
             if (expr is IAddressDereferenceExpression) return false;
-            if (expr is IAddressOutExpression iaoe) return IsStochastic(context, iaoe.Expression);
+            if (expr is IAddressOutExpression) return false;
             if (expr is ILambdaExpression) return false; // todo: stochastic case?
             if (expr is IAnonymousMethodExpression) return false;
             if (expr is ITypeOfExpression) return false;
+            if (expr is IMethodReferenceExpression) return false;
 
             IVariableDeclaration ivd = Instance.GetVariableDeclaration(expr);
             if (ivd == null)
@@ -2305,6 +2341,86 @@ namespace Microsoft.ML.Probabilistic.Compiler
         {
             VariableInformation vi = VariableInformation.GetVariableInformation(context, ivd);
             return vi.IsStochastic;
+        }
+
+        /// <summary>
+        /// Returns true if any of the expression are stochastic.
+        /// </summary>
+        /// <param name="context"></param>
+        /// <param name="iec"></param>
+        /// <returns></returns>
+        internal static bool AnyNeedsMarginalDividedByPrior(BasicTransformContext context, IList<IExpression> iec)
+        {
+            foreach (IExpression expr in iec) if (NeedsMarginalDividedByPrior(context, expr)) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Returns true if the expression is stochastic.
+        /// </summary>
+        /// <param name="context"></param>
+        /// <param name="expr"></param>
+        /// <returns></returns>
+        internal static bool NeedsMarginalDividedByPrior(BasicTransformContext context, IExpression expr)
+        {
+            if (expr is ILiteralExpression) return false;
+            if (expr is IDefaultExpression) return false;
+            if (expr is IMethodInvokeExpression imie)
+            {
+                bool stochArgs = AnyNeedsMarginalDividedByPrior(context, imie.Arguments);
+                bool stochFactor = false;
+                FactorManager.FactorInfo info = GetFactorInfo(context, imie);
+                if (info != null) stochFactor = !info.IsDeterministicFactor;
+                bool st = stochArgs || stochFactor;
+                //if (st) context.OutputAttributes.Set(imie, new Stochastic()); // for IfCuttingTransform
+                return st;
+            }
+            if (expr is IArgumentReferenceExpression) return false;
+            if (expr is IPropertyReferenceExpression ipre) return NeedsMarginalDividedByPrior(context, ipre.Target);
+            if (expr is IFieldReferenceExpression ifre) return NeedsMarginalDividedByPrior(context, ifre.Target);
+            if (expr is IArrayCreateExpression) return false;
+            if (expr is IObjectCreateExpression ioce)
+            {
+                return AnyNeedsMarginalDividedByPrior(context, ioce.Arguments);
+            }
+            if (expr is IUnaryExpression iue)
+            {
+                return NeedsMarginalDividedByPrior(context, iue.Expression);
+            }
+            if (expr is IBinaryExpression ibe)
+            {
+                return NeedsMarginalDividedByPrior(context, ibe.Left) || NeedsMarginalDividedByPrior(context, ibe.Right);
+            }
+            if (expr is IArrayIndexerExpression iaie)
+            {
+                return NeedsMarginalDividedByPrior(context, iaie.Target) || AnyNeedsMarginalDividedByPrior(context, iaie.Indices);
+            }
+            if (expr is ICastExpression ice) return NeedsMarginalDividedByPrior(context, ice.Expression);
+            if (expr is ICheckedExpression ichecked) return NeedsMarginalDividedByPrior(context, ichecked.Expression);
+            if (expr is IPropertyIndexerExpression ipie)
+            {
+                return NeedsMarginalDividedByPrior(context, ipie.Target) || AnyNeedsMarginalDividedByPrior(context, ipie.Indices);
+            }
+            if (expr is IAddressDereferenceExpression) return false;
+            if (expr is IAddressOutExpression) return false;
+            if (expr is ILambdaExpression) return false; // todo: stochastic case?
+            if (expr is IAnonymousMethodExpression) return false;
+            if (expr is ITypeOfExpression) return false;
+            if (expr is IMethodReferenceExpression) return false;
+
+            IVariableDeclaration ivd = Instance.GetVariableDeclaration(expr);
+            if (ivd == null)
+            {
+                context.Error("Could not find stochasticity of expression of type " + expr.GetType().Name + ": " + expr);
+                return false;
+            }
+            return NeedsMarginalDividedByPrior(context, ivd);
+        }
+
+        internal static bool NeedsMarginalDividedByPrior(BasicTransformContext context, IVariableDeclaration ivd)
+        {
+            VariableInformation vi = VariableInformation.GetVariableInformation(context, ivd);
+            return vi.NeedsMarginalDividedByPrior;
         }
 
         internal static bool IsInfer(IExpression expr)

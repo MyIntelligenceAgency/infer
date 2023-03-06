@@ -14,28 +14,28 @@
   <Choose>
     <When Condition="'$(Configuration)'=='DebugFull' OR '$(Configuration)'=='ReleaseFull'">
       <PropertyGroup>
-        <TargetFramework>net461</TargetFramework>
+        <TargetFramework>net472</TargetFramework>
       </PropertyGroup>
     </When>
     <When Condition="'$(Configuration)'=='DebugCore' OR '$(Configuration)'=='ReleaseCore'">
       <PropertyGroup>
-        <TargetFramework>netcoreapp3.1</TargetFramework>
+        <TargetFramework>net6.0</TargetFramework>
       </PropertyGroup>
     </When>
     <Otherwise>
       <PropertyGroup>
-        <TargetFrameworks>netcoreapp3.1;net461</TargetFrameworks>
+        <TargetFrameworks>net6.0;net6.0-windows;net472</TargetFrameworks>
         <!-- No need to generate code twice -->
         <IgnorePostBuildNetCore>true</IgnorePostBuildNetCore>
       </PropertyGroup>
     </Otherwise>
   </Choose>
 
-  <PropertyGroup Condition=" '$(TargetFramework)' == 'netcoreapp3.1'">
+  <PropertyGroup Condition=" '$(TargetFramework)' == 'net6.0'">
     <RunPostBuildNetCore Condition="$(IgnorePostBuildNetCore) != 'true'">true</RunPostBuildNetCore>
   </PropertyGroup>
 
-  <PropertyGroup Condition=" '$(TargetFramework)' == 'net461'">
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net6.0-windows' OR '$(TargetFramework)' == 'net472'">
     <RunPostBuildNetFull>true</RunPostBuildNetFull>
   </PropertyGroup>
 
@@ -68,7 +68,7 @@
     <ProjectReference Include="..\..\Runtime\Runtime.csproj" />
   </ItemGroup>
 
-  <ItemGroup Condition="$(DefineConstants.Contains('NETFRAMEWORK'))">
+  <ItemGroup Condition="$(DefineConstants.Contains('NETFRAMEWORK')) OR $(TargetFramework.Contains('windows'))">
     <ProjectReference Include="..\..\Visualizers\Windows\Visualizers.Windows.csproj" />
   </ItemGroup>
 
@@ -78,7 +78,7 @@
   </ItemGroup>
 
   <Target Name="PostBuildNetFull" AfterTargets="PostBuildEvent" Condition="'$(RunPostBuildNetFull)' == 'true'">
-    <Exec Command="&quot;$(TargetPath)&quot; &quot;$([System.IO.Path]::Combine($(SolutionDir),'src', 'Learners', 'Classifier', 'BayesPointMachineClassifierInternal', 'GeneratedAlgorithms'))&quot;" />
+    <Exec Command="&quot;$(TargetPath.Replace('.dll', '.exe'))&quot; &quot;$([System.IO.Path]::Combine($(SolutionDir),'src', 'Learners', 'Classifier', 'BayesPointMachineClassifierInternal', 'GeneratedAlgorithms'))&quot;" />
   </Target>
 
   <Target Name="PostBuildNetCore" AfterTargets="PostBuildEvent" Condition="'$(RunPostBuildNetCore)' == 'true'">

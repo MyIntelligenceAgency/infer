@@ -17,12 +17,12 @@ trigger: none # disable CI build
 jobs:
 - job: macOS # Hosted MacOS agent
   pool:
-    vmImage: macOS-10.14
+    vmImage: macOS-latest
   steps:
   - task: UseDotNet@2
     inputs:
       packageType: 'sdk' 
-      version: '3.x' 
+      version: '6.x'
 
   - script: |
       dotnet build --configuration $(BuildConfiguration)Core Infer.sln
@@ -32,12 +32,12 @@ jobs:
 
 - job: Linux # Hosted Linux agent
   pool:
-    vmImage: ubuntu-16.04
+    vmImage: ubuntu-latest
   steps:
   - task: UseDotNet@2
     inputs:
       packageType: 'sdk' 
-      version: '3.x' 
+      version: '6.x'
 
   - script: |
       dotnet build --configuration $(BuildConfiguration)Core Infer.sln
@@ -47,7 +47,7 @@ jobs:
 
 - job: Windows # Hosted Windows agent
   pool:
-    vmImage: windows-2019
+    vmImage: windows-latest
 
   steps:
   - task: Bash@3
@@ -104,7 +104,7 @@ jobs:
   - macOS
   - Windows
   pool:
-    name: VSEngSS-MicroBuild2019 # For real signing
+    name: VSEngSS-MicroBuild2022-1ES # For real signing
 
   steps:
   # Install MicroBuild plugin
@@ -145,15 +145,14 @@ jobs:
     inputs:
       solution: build/sign.proj
       msbuildArguments: /p:SignType=$(SignType) /verbosity:detailed
-      msbuildVersion: 14.0
       maximumCpuCount: true
     condition: in(variables.SignType, 'real', 'test')
 
   - task: UseDotNet@2
-    displayName: Get dotnet 3.x
+    displayName: Get dotnet 6.x
     inputs:
       packageType: 'sdk'
-      version: '3.x'
+      version: '6.x'
 
   - task: DotNetCoreCLI@2
     displayName: Restore Infer.sln to enable packaging.
@@ -177,7 +176,6 @@ jobs:
     inputs:
       solution: build/sign.proj
       msbuildArguments: /p:SignType=$(SignType) /p:SignNugetPackages=true /verbosity:detailed
-      msbuildVersion: 14.0
       maximumCpuCount: true
     condition: in(variables.SignType, 'real', 'test')
 

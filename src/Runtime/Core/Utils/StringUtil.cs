@@ -12,10 +12,6 @@ using Microsoft.ML.Probabilistic.Collections;
 
 namespace Microsoft.ML.Probabilistic.Utilities
 {
-#if SUPPRESS_XMLDOC_WARNINGS
-#pragma warning disable 1591
-#endif
-
     /// <summary>
     /// Helpful methods for converting objects to strings.
     /// </summary>
@@ -622,7 +618,7 @@ namespace Microsoft.ML.Probabilistic.Utilities
                     try
                     {
                         //string rhs = ToString(prop.GetValue(o, null));
-                        string rhs = prop.GetValue(o, null).ToString();
+                        string rhs = prop.GetValue(o, null)?.ToString() ?? "null";
                         if (i > 0) s.Append(delimiter);
                         s.Append(JoinColumns(prop.Name, " = ", rhs));
                         i++;
@@ -804,6 +800,5 @@ namespace Microsoft.ML.Probabilistic.Utilities
     }
 
 #if SUPPRESS_XMLDOC_WARNINGS
-#pragma warning restore 1591
 #endif
 }
