@@ -38,12 +38,31 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// <returns>The estimated distribution</returns>
         public Discrete GetDistribution(Discrete result)
         {
-            if (result == null) result = Distributions.Discrete.Uniform(NProb.Count);
+            if (result == null) result = Discrete.Uniform(NProb.Count);
             if (N > 0)
                 result.SetProbs(NProb*(1.0/N));
             else
                 result.SetToUniform();
             return result;
+        }
+
+        /// <summary>
+        /// Gets the maximum over all dimensions of the variance of the log probability.  Decreases as N increases.
+        /// </summary>
+        /// <returns></returns>
+        public double GetMaximumVarianceOfLog()
+        {
+            return 1.0 / NProb.Reduce(double.PositiveInfinity, (min, x) => x > 0 ? System.Math.Min(min, x) : min);
+        }
+
+        /// <summary>
+        /// Adds all items in another estimator to this estimator.
+        /// </summary>
+        /// <param name="that">Another estimator</param>
+        public void Add(DiscreteEstimator that)
+        {
+            NProb.SetToSum(NProb, that.NProb);
+            N += that.N;
         }
 
         /// <summary>
@@ -60,10 +79,21 @@ namespace Microsoft.ML.Probabilistic.Distributions
         /// Adds a weighted discrete distribution item to the estimator
         /// </summary>
         /// <param name="distribution">A Discrete instance</param>
-        /// <param name="weight">Weight</param>
+        /// <param name="weight">The weight of the instance</param>
         public void Add(Discrete distribution, double weight)
         {
             NProb.SetToSum(1.0, NProb, weight, distribution.GetProbs());
+            N += weight;
+        }
+
+        /// <summary>
+        /// Adds a weighted discrete sample to the estimator
+        /// </summary>
+        /// <param name="sample">The sample value</param>
+        /// <param name="weight">The weight of the sample</param>
+        public void Add(int sample, double weight)
+        {
+            NProb[sample] += weight;
             N += weight;
         }
 
