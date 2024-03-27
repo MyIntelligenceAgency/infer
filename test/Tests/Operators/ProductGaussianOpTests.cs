@@ -34,6 +34,9 @@ namespace Microsoft.ML.Probabilistic.Tests
         [Fact]
         public void ProductOpTest()
         {
+            GaussianProductOp.ProductAverageConditional(Gaussian.FromNatural(-1765.4546871987516, 1338.3779930136373), Gaussian.FromNatural(47353.238656616719, 51908.220427509987), Gaussian.FromNatural(-110433.17966670298, 385287.49472649547));
+            GaussianProductOp_Slow.AAverageConditional(Gaussian.FromNatural(1.2464052053935622E-100, 8.057496451574595E-100), Gaussian.FromNatural(367.30950323702245, 328.35007985731033), Gaussian.FromNatural(951.91707682214258, 6998.5956711899107));
+            GaussianProductOp_Slow.AAverageConditional(Gaussian.FromNatural(-32.320457480359039, 43.195460703170248), Gaussian.FromNatural(-41.083697150214341, 22.757594736100287), Gaussian.FromNatural(31.117245365484337, 27.164520772286647));
             Assert.True(GaussianProductOp_Slow.ProductAverageConditional(
                 Gaussian.FromNatural(0.0019528178431691338, 3.25704676859826E-06),
                 Gaussian.FromNatural(-1.4311468676808659E-17, 5.4527745979495584E-21),
@@ -191,21 +194,22 @@ namespace Microsoft.ML.Probabilistic.Tests
         }
 
         [Fact]
-        [Trait("Category", "OpenBug")]
         public void GaussianProductOp_ProductPointMassTest()
         {
             Gaussian A = new Gaussian(1, 2);
             Gaussian B = new Gaussian(3, 4);
             Gaussian pointMass = Gaussian.PointMass(4);
             Gaussian to_pointMass = GaussianProductOp.ProductAverageConditional(pointMass, A, B);
+            //Console.WriteLine(to_pointMass);
             double prevDiff = double.PositiveInfinity;
             for (int i = 0; i < 100; i++)
             {
-                Gaussian Product = Gaussian.FromMeanAndVariance(4, System.Math.Pow(10, -i));
+                Gaussian Product = Gaussian.FromMeanAndVariance(pointMass.Point, System.Math.Pow(10, -i));
                 Gaussian to_product = GaussianProductOp.ProductAverageConditional(Product, A, B);
-                double evidence = GaussianProductOp.LogEvidenceRatio(Product, A, B, to_product);
-                Console.WriteLine($"{Product} {to_product} {evidence}");
+                //Gaussian to_product2 = GaussianProductOp_Slow.ProductAverageConditional(Product, A, B);
+                //double evidence = GaussianProductOp.LogEvidenceRatio(Product, A, B, to_product);
                 double diff = to_product.MaxDiff(to_pointMass);
+                //Console.WriteLine($"{Product} {to_product} {evidence} {diff}");
                 Assert.True(diff <= prevDiff || diff < 1e-6);
                 prevDiff = diff;
             }
